@@ -1,0 +1,100 @@
+
+{
+	"info": {
+		"_postman_id": "7a8b9c0d-1e2f-3a4b-5c6d-7e8f9a0b1c2d",
+		"name": "Azure DevOps Reporter API",
+		"description": "Collection for testing the Azure DevOps Work Item Reporter API",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Health Check",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/health",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"health"
+					]
+				},
+				"description": "Check if the API service is running correctly"
+			},
+			"response": []
+		},
+		{
+			"name": "Generate Report",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"AZURE_PAT\": \"{{azure_pat}}\",\n  \"ORGANIZATION\": \"{{organization}}\",\n  \"PROJECT\": \"{{project}}\",\n  \"CUSTOM_FIELDS\": [\"Custom.BusinessValue\", \"Custom.Priority\"],\n  \"SHEET_COUNT\": 4,\n  \"storage_account_name\": \"{{storage_account_name}}\",\n  \"container_name\": \"{{container_name}}\",\n  \"storage_account_sas\": \"{{storage_account_sas}}\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/api/generate-report",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"generate-report"
+					]
+				},
+				"description": "Generate an Azure DevOps work item report and upload it to Azure Blob Storage"
+			},
+			"response": []
+		}
+	],
+	"event": [],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:5000",
+			"type": "string"
+		},
+		{
+			"key": "azure_pat",
+			"value": "your-azure-devops-personal-access-token",
+			"type": "string"
+		},
+		{
+			"key": "organization",
+			"value": "your-azure-devops-organization",
+			"type": "string"
+		},
+		{
+			"key": "project",
+			"value": "your-azure-devops-project",
+			"type": "string"
+		},
+		{
+			"key": "storage_account_name",
+			"value": "your-storage-account-name",
+			"type": "string"
+		},
+		{
+			"key": "container_name",
+			"value": "your-container-name",
+			"type": "string"
+		},
+		{
+			"key": "storage_account_sas",
+			"value": "your-storage-account-sas-token",
+			"type": "string"
+		}
+	]
+}

@@ -1,73 +1,167 @@
-# Welcome to your Lovable project
 
-## Project info
+# Azure DevOps Work Item Report Generator
 
-**URL**: https://lovable.dev/projects/8d5db480-ee7c-4256-a9a7-f3a07a64b73b
+A containerized Python API service that connects to Azure DevOps, rolls up hierarchical work item data, and generates Excel reports.
 
-## How can I edit this code?
+## Features
 
-There are several ways of editing your application.
+- Connects to Azure DevOps REST API
+- Extracts work item hierarchy (Epics → Features → Stories → Tasks)
+- Rolls up metrics (estimated hours, completed work)
+- Generates Excel report with configurable detail levels
+- Uploads report to Azure Blob Storage
+- Containerized for easy deployment
 
-**Use Lovable**
+## Project Structure
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/8d5db480-ee7c-4256-a9a7-f3a07a64b73b) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+```
+.
+├── src/
+│   ├── app.py                    # Main Flask API
+│   ├── services/
+│   │   ├── azure_devops_service.py   # Azure DevOps API integration
+│   │   ├── report_service.py         # Excel report generation
+│   │   └── storage_service.py        # Azure Blob Storage integration
+│   └── requirements.txt          # Python dependencies
+├── Dockerfile                    # Container definition
+├── docker-compose.yml            # Local development setup
+└── README.md                     # Documentation
 ```
 
-**Edit a file directly in GitHub**
+## Setup & Deployment
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+### Prerequisites
 
-**Use GitHub Codespaces**
+- Docker and Docker Compose
+- Azure DevOps organization and project
+- Azure DevOps Personal Access Token (PAT) with read access to work items
+- Azure Storage Account with a container for report storage
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+### Building the Docker Image
 
-## What technologies are used for this project?
+```bash
+docker build -t azure-devops-reporter .
+```
 
-This project is built with:
+### Running with Docker Compose
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+```bash
+docker-compose up -d
+```
 
-## How can I deploy this project?
+### Running with Docker
 
-Simply open [Lovable](https://lovable.dev/projects/8d5db480-ee7c-4256-a9a7-f3a07a64b73b) and click on Share -> Publish.
+```bash
+docker run -p 5000:5000 azure-devops-reporter
+```
 
-## Can I connect a custom domain to my Lovable project?
+## API Usage
 
-Yes, you can!
+### Endpoint: `/api/generate-report`
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+**Method**: POST
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+**Headers**:
+- Content-Type: application/json
+
+**Request Body**:
+
+```json
+{
+  "AZURE_PAT": "your-azure-devops-personal-access-token",
+  "ORGANIZATION": "your-azure-devops-organization",
+  "PROJECT": "your-azure-devops-project",
+  "CUSTOM_FIELDS": ["Custom.Business_Value", "Custom.Priority"],
+  "SHEET_COUNT": 4,
+  "storage_account_name": "your-storage-account-name",
+  "container_name": "your-container-name",
+  "storage_account_sas": "your-storage-account-sas-token"
+}
+```
+
+**Response**:
+
+```json
+{
+  "message": "Report generated successfully",
+  "file_url": "https://storage-account.blob.core.windows.net/container/report_20220101_120000.xlsx"
+}
+```
+
+### Example API Call (cURL)
+
+```bash
+curl -X POST \
+  http://localhost:5000/api/generate-report \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "AZURE_PAT": "your-azure-devops-personal-access-token",
+    "ORGANIZATION": "your-azure-devops-organization",
+    "PROJECT": "your-azure-devops-project",
+    "CUSTOM_FIELDS": ["Custom.Business_Value", "Custom.Priority"],
+    "SHEET_COUNT": 4,
+    "storage_account_name": "your-storage-account-name",
+    "container_name": "your-container-name", 
+    "storage_account_sas": "your-storage-account-sas-token"
+  }'
+```
+
+### Example API Call (Python)
+
+```python
+import requests
+import json
+
+url = "http://localhost:5000/api/generate-report"
+payload = {
+    "AZURE_PAT": "your-azure-devops-personal-access-token",
+    "ORGANIZATION": "your-azure-devops-organization",
+    "PROJECT": "your-azure-devops-project",
+    "CUSTOM_FIELDS": ["Custom.Business_Value", "Custom.Priority"],
+    "SHEET_COUNT": 4,
+    "storage_account_name": "your-storage-account-name",
+    "container_name": "your-container-name",
+    "storage_account_sas": "your-storage-account-sas-token"
+}
+headers = {"Content-Type": "application/json"}
+
+response = requests.post(url, data=json.dumps(payload), headers=headers)
+print(response.json())
+```
+
+## Configuration Options
+
+- **AZURE_PAT**: Azure DevOps Personal Access Token
+- **ORGANIZATION**: Azure DevOps Organization name
+- **PROJECT**: Azure DevOps Project name
+- **CUSTOM_FIELDS**: List of custom field names to extract (optional)
+- **SHEET_COUNT**: Integer (1-4) indicating how many Excel sheets to generate (default = 4)
+  - 1: Epic Summary
+  - 2: + Feature Breakdown
+  - 3: + Story Breakdown
+  - 4: + Leaf Tasks (full detail)
+- **storage_account_name**: Azure Storage account name
+- **container_name**: Azure Storage container name
+- **storage_account_sas**: SAS token for Azure Storage authentication
+
+## Health Check
+
+The API provides a health check endpoint at `/health` that returns status 200 if the service is running.
+
+```bash
+curl http://localhost:5000/health
+```
+
+## Security Considerations
+
+- The API expects all sensitive information (PAT tokens, SAS tokens) to be passed in the request body
+- For production use, consider implementing proper authentication and authorization
+- SAS tokens should be generated with limited permissions and expiration time
+
+## Error Handling
+
+The API returns appropriate HTTP status codes:
+
+- 200: Success
+- 400: Invalid or missing parameters
+- 500: Internal server error (with error details)
