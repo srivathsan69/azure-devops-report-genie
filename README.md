@@ -1,4 +1,5 @@
 
+
 # Azure DevOps Work Item Report Generator
 
 A containerized Python API service that connects to Azure DevOps, rolls up hierarchical work item data, and generates Excel reports.
@@ -8,6 +9,7 @@ A containerized Python API service that connects to Azure DevOps, rolls up hiera
 - Connects to Azure DevOps REST API
 - Extracts work item hierarchy (Epics → Features → Stories → Tasks)
 - Filters Epics based on custom field values
+- Filters work items by creation date
 - Rolls up metrics (estimated hours, completed work)
 - Generates Excel report with configurable detail levels
 - Uploads report to Azure Blob Storage
@@ -106,6 +108,7 @@ docker run -p 5000:5000 azure-devops-reporter
       "value": "1"
     }
   ],
+  "filter_date": "2025-01-01",
   "SHEET_COUNT": 4,
   "storage_account_name": "your-storage-account-name",
   "container_name": "your-container-name",
@@ -138,6 +141,7 @@ curl -X POST \
         "value": "High"
       }
     ],
+    "filter_date": "2025-01-01",
     "SHEET_COUNT": 4,
     "storage_account_name": "your-storage-account-name",
     "container_name": "your-container-name", 
@@ -162,6 +166,7 @@ payload = {
         "value": "High"
       }
     ],
+    "filter_date": "2025-01-01",
     "SHEET_COUNT": 4,
     "storage_account_name": "your-storage-account-name",
     "container_name": "your-container-name",
@@ -181,6 +186,7 @@ print(response.json())
 - **CUSTOM_FIELDS**: List of objects with key-value pairs for custom field filtering:
   - **key**: Custom field name
   - **value**: Custom field value to filter on
+- **filter_date**: Optional date string (YYYY-MM-DD) to filter work items created on or after this date
 - **SHEET_COUNT**: Integer (1-4) indicating how many Excel sheets to generate (default = 4)
   - 1: Epic Summary
   - 2: + Feature Breakdown
@@ -224,3 +230,4 @@ The service is designed to be easily customized:
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
+

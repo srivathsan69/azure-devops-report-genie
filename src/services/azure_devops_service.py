@@ -28,13 +28,14 @@ class AzureDevOpsService:
         """Get current timestamp formatted for filenames"""
         return datetime.now().strftime("%Y%m%d_%H%M%S")
     
-    def fetch_epics(self, custom_field_filters: List[Dict[str, str]] = None) -> List[Dict[str, Any]]:
+    def fetch_epics(self, custom_field_filters: List[Dict[str, str]] = None, filter_date: str = None) -> List[Dict[str, Any]]:
         """
-        Fetch Epic work items using WIQL query with optional custom field filters
+        Fetch Epic work items using WIQL query with optional custom field filters and date filter
         
         Args:
             custom_field_filters: List of dicts with 'key' and 'value' to filter epics
                                   Example: [{'key': 'Custom.Feasible', 'value': 'Yes'}]
+            filter_date: Optional date string (YYYY-MM-DD) to filter work items created on or after this date
         """
         url = f"{self.base_url}/wit/wiql?api-version={self.api_version}"
         
@@ -46,6 +47,16 @@ class AzureDevOpsService:
             AND [System.TeamProject] = '{self.project}'
             AND [System.State] <> 'Closed'
         """
+        
+        # Add date filter if provided
+        if filter_date:
+            try:
+                # Validate date format
+                datetime.strptime(filter_date, '%Y-%m-%d')
+                logger.info(f"Filtering work items created on or after {filter_date}")
+                query += f"AND [System.CreatedDate] >= '{filter_date}'\n"
+            except ValueError:
+                logger.warning(f"Invalid date format for filter_date: {filter_date}. Expected YYYY-MM-DD. Ignoring date filter.")
         
         # Add custom field filters if provided
         if custom_field_filters and isinstance(custom_field_filters, list):
@@ -92,7 +103,55 @@ class AzureDevOpsService:
             logger.exception(f"Error fetching Epics: {str(e)}")
             raise
     
-    # ... keep existing code (remaining methods for get_work_items_details, get_work_item_relations, etc.)
+    def get_work_items_details(self, work_item_ids: List[int]) -> List[Dict[str, Any]]:
+        """
+        Get detailed information for the specified work items
+        
+        Args:
+            work_item_ids: List of work item IDs
+        """
+        if not work_item_ids:
+            return []
+            
+        # Azure DevOps API has a limit on the number of IDs in a single request
+        batch_size = 200
+        batched_ids = [work_item_ids[i:i + batch_size] for i in range(0, len(work_item_ids), batch_size)]
+        
+        all_work_items = []
+        
+        for batch in batched_ids:
+            ids_string = ",".join(map(str, batch))
+            url = f"{self.base_url}/wit/workitems?ids={ids_string}&$expand=relations&api-version={self.api_version}"
+            
+            try:
+                response = requests.get(url, headers=self.headers)
+                response.raise_for_status()
+                
+                batch_results = response.json().get("value", [])
+                all_work_items.extend(batch_results)
+                
+            except requests.exceptions.RequestException as e:
+                logger.exception(f"Error fetching work item details: {str(e)}")
+                raise
+                
+        return all_work_items
+    
+    def get_work_item_relations(self, work_item_id: int) -> Dict[str, Any]:
+        """
+        Get work item with all its relations
+        
+        Args:
+            work_item_id: ID of the work item
+        """
+        url = f"{self.base_url}/wit/workitems/{work_item_id}?$expand=relations&api-version={self.api_version}"
+        
+        try:
+            response = requests.get(url, headers=self.headers)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            logger.exception(f"Error fetching work item relations: {str(e)}")
+            raise
     
     def traverse_hierarchy(self, epics: List[Dict[str, Any]], custom_fields: List[Dict[str, str]]) -> Dict[str, Any]:
         """
@@ -126,8 +185,6 @@ class AzureDevOpsService:
         }
         
         logger.info(f"Processing {len(epics)} epics and their hierarchies")
-        
-        # ... keep existing code (the traversal logic for epics, features, stories and tasks)
         
         # Update the _extract_work_item_data method to handle custom fields from the custom_field_names list
         for epic in epics:
@@ -264,4 +321,16 @@ class AzureDevOpsService:
         
         return data
     
-    # ... keep existing code (for _get_field_value and _extract_person_name methods)
+    def _get_field_value(self, work_item: Dict[str, Any], field_name: str, default_value: Any = None) -> Any:
+        """Get field value from work item"""
+        return work_item.get("fields", {}).get(field_name, default_value)
+    
+    def _extract_person_name(self, person_data: Any) -> str:
+        """Extract display name from person data"""
+        if not person_data:
+            return "Unassigned"
+            
+        if isinstance(person_data, dict) and "displayName" in person_data:
+            return person_data["displayName"]
+            
+        return str(person_data)

@@ -99,6 +99,9 @@ def generate_report_api():
                   value:
                     type: string
                     description: Custom field value for filtering
+            filter_date:
+              type: string
+              description: Optional date string (YYYY-MM-DD) to filter work items created on or after this date
             SHEET_COUNT:
               type: integer
               description: Number of sheets to include in the report (1-4)
@@ -152,6 +155,7 @@ def generate_report():
         # Optional parameters
         custom_fields = data.get('CUSTOM_FIELDS', [])
         sheet_count = int(data.get('SHEET_COUNT', 4))
+        filter_date = data.get('filter_date')  # New parameter for date filtering
         
         # Storage account parameters
         storage_account_name = data.get('storage_account_name')
@@ -176,6 +180,16 @@ def generate_report():
             return jsonify({
                 "error": "SHEET_COUNT must be between 1 and 4."
             }), 400
+            
+        # Validate date format if provided
+        if filter_date:
+            try:
+                datetime.strptime(filter_date, '%Y-%m-%d')
+            except ValueError:
+                logger.error(f"Invalid date format: {filter_date}")
+                return jsonify({
+                    "error": "Invalid filter_date format. Please use YYYY-MM-DD format."
+                }), 400
 
         # Initialize services
         logger.info("Initializing services")
@@ -187,9 +201,9 @@ def generate_report():
             storage_account_sas
         )
         
-        # Step 1: Fetch Epics from Azure DevOps using the custom field filters
+        # Step 1: Fetch Epics from Azure DevOps using the custom field filters and date filter
         logger.info("Fetching Epics from Azure DevOps...")
-        epics = azure_devops.fetch_epics(custom_fields)
+        epics = azure_devops.fetch_epics(custom_fields, filter_date)
         
         if not epics:
             logger.warning("No Epics found matching the criteria")
