@@ -1,4 +1,3 @@
-
 import xlsxwriter
 import logging
 from typing import Dict, Any, List
@@ -8,7 +7,17 @@ logger = logging.getLogger(__name__)
 
 class ReportService:
     def __init__(self):
+        """
+        Initialize the report service with base column definitions.
+        
+        Note: These column definitions can be easily modified to change the order or add/remove columns.
+        Each column is defined as a dictionary with the following keys:
+        - header: The display name of the column
+        - field: The field name in the data structure
+        - width: The width of the column in the Excel sheet
+        """
         # Define column headers and mappings for each report level
+        # CUSTOMIZATION POINT: Modify these lists to change column order or add/remove standard columns
         self.epic_columns = [
             {"header": "ID", "field": "id", "width": 10},
             {"header": "Title", "field": "title", "width": 40},
@@ -18,6 +27,7 @@ class ReportService:
             {"header": "Completed Work", "field": "completed_work", "width": 15},
             {"header": "% Complete", "field": "percent_complete", "width": 15},
             {"header": "Created Date", "field": "created_date", "width": 20}
+            # Custom fields will be dynamically added to these columns
         ]
         
         self.feature_columns = [
@@ -30,6 +40,7 @@ class ReportService:
             {"header": "Estimated Hours", "field": "estimated_hours", "width": 15},
             {"header": "Completed Work", "field": "completed_work", "width": 15},
             {"header": "% Complete", "field": "percent_complete", "width": 15}
+            # Custom fields will be dynamically added to these columns
         ]
         
         self.story_columns = [
@@ -42,6 +53,7 @@ class ReportService:
             {"header": "Estimated Hours", "field": "estimated_hours", "width": 15},
             {"header": "Completed Work", "field": "completed_work", "width": 15},
             {"header": "% Complete", "field": "percent_complete", "width": 15}
+            # Custom fields will be dynamically added to these columns
         ]
         
         self.task_columns = [
@@ -55,21 +67,69 @@ class ReportService:
             {"header": "Estimated Hours", "field": "estimated_hours", "width": 15},
             {"header": "Completed Work", "field": "completed_work", "width": 15},
             {"header": "Remaining Work", "field": "remaining_work", "width": 15}
+            # Custom fields will be dynamically added to these columns
         ]
+    
+    def _add_custom_field_columns(self, custom_fields: List[str]):
+        """
+        Add custom field columns to all column definitions
+        
+        Args:
+            custom_fields: List of custom field names to add
+        """
+        # CUSTOMIZATION POINT: Modify this method to change how custom fields are added or formatted
+        if not custom_fields:
+            return
+            
+        logger.info(f"Adding {len(custom_fields)} custom fields to report columns")
+        
+        for field in custom_fields:
+            # Get simple field name (without namespace)
+            simple_name = field.split('.')[-1] if '.' in field else field
+            field_column = {"header": simple_name, "field": simple_name, "width": 25}
+            
+            # Add to all column sets
+            self.epic_columns.append(field_column)
+            self.feature_columns.append(field_column)
+            self.story_columns.append(field_column)
+            self.task_columns.append(field_column)
+            
+            logger.debug(f"Added custom field column: {simple_name}")
     
     def build_excel_workbook(self, 
                            data: Dict[str, Any], 
                            output_path: str, 
                            sheet_count: int = 4,
-                           custom_fields: List[str] = None) -> None:
+                           custom_fields: List[Any] = None) -> None:
         """
         Build Excel workbook with up to 4 sheets based on the sheet_count parameter
+        
+        Args:
+            data: The hierarchical work item data
+            output_path: Path where the Excel file will be saved
+            sheet_count: Number of sheets to include (1-4)
+            custom_fields: List of custom fields to include in the report
         """
-        if custom_fields is None:
-            custom_fields = []
+        # Extract just the field names from custom_fields if it's a list of dicts
+        custom_field_names = []
+        if custom_fields:
+            logger.debug(f"Processing custom fields: {custom_fields}")
+            for field_item in custom_fields:
+                if isinstance(field_item, dict) and 'key' in field_item:
+                    field_name = field_item['key']
+                    # Get simple field name (without namespace)
+                    simple_name = field_name.split('.')[-1] if '.' in field_name else field_name
+                    custom_field_names.append(simple_name)
+                elif isinstance(field_item, str):  # For backward compatibility
+                    simple_name = field_item.split('.')[-1] if '.' in field_item else field_item
+                    custom_field_names.append(simple_name)
+        
+        # Add custom field columns to all column definitions
+        self._add_custom_field_columns(custom_field_names)
             
         try:
             # Create a new Excel workbook and add worksheets based on sheet_count
+            logger.info(f"Creating Excel workbook with {sheet_count} sheets")
             workbook = xlsxwriter.Workbook(output_path)
             
             # Define styles
@@ -98,15 +158,6 @@ class ReportService:
                 'num_format': 'yyyy-mm-dd',
                 'valign': 'vcenter'
             })
-            
-            # Add custom fields to each column set if provided
-            if custom_fields:
-                for field in custom_fields:
-                    field_column = {"header": field, "field": field, "width": 20}
-                    self.epic_columns.append(field_column)
-                    self.feature_columns.append(field_column)
-                    self.story_columns.append(field_column)
-                    self.task_columns.append(field_column)
             
             # Sheet 1: Epic Summary (always included)
             if sheet_count >= 1:

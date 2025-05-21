@@ -6,13 +6,10 @@ import tempfile
 from services.azure_devops_service import AzureDevOpsService
 from services.report_service import ReportService
 from services.storage_service import AzureBlobStorageService
+from services.logging_service import setup_logging
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+logger = setup_logging(log_level=logging.INFO)
 
 app = Flask(__name__)
 
@@ -25,11 +22,15 @@ def generate_report():
     try:
         # Extract parameters from JSON request
         data = request.get_json()
+        logger.info("Received report generation request")
+        logger.debug(f"Request parameters: {data}")
         
         # Required parameters
         azure_pat = data.get('AZURE_PAT')
         organization = data.get('ORGANIZATION')
         project = data.get('PROJECT')
+        
+        # Optional parameters
         custom_fields = data.get('CUSTOM_FIELDS', [])
         sheet_count = int(data.get('SHEET_COUNT', 4))
         
@@ -40,21 +41,25 @@ def generate_report():
         
         # Validate required parameters
         if not all([azure_pat, organization, project]):
+            logger.error("Missing required parameters")
             return jsonify({
                 "error": "Missing required parameters. Please provide AZURE_PAT, ORGANIZATION, and PROJECT."
             }), 400
             
         if not all([storage_account_name, container_name, storage_account_sas]):
+            logger.error("Missing storage parameters")
             return jsonify({
                 "error": "Missing storage parameters. Please provide storage_account_name, container_name, and storage_account_sas."
             }), 400
             
         if not 1 <= sheet_count <= 4:
+            logger.error(f"Invalid SHEET_COUNT: {sheet_count}")
             return jsonify({
                 "error": "SHEET_COUNT must be between 1 and 4."
             }), 400
 
         # Initialize services
+        logger.info("Initializing services")
         azure_devops = AzureDevOpsService(azure_pat, organization, project)
         report_service = ReportService()
         storage_service = AzureBlobStorageService(
@@ -63,11 +68,12 @@ def generate_report():
             storage_account_sas
         )
         
-        # Step 1: Fetch Epics from Azure DevOps
+        # Step 1: Fetch Epics from Azure DevOps using the custom field filters
         logger.info("Fetching Epics from Azure DevOps...")
-        epics = azure_devops.fetch_epics()
+        epics = azure_devops.fetch_epics(custom_fields)
         
         if not epics:
+            logger.warning("No Epics found matching the criteria")
             return jsonify({
                 "message": "No Epics found matching the criteria.",
                 "file_url": None
@@ -99,6 +105,7 @@ def generate_report():
         # Clean up temp file
         os.unlink(temp_file_path)
         
+        logger.info("Report generation completed successfully")
         return jsonify({
             "message": "Report generated successfully",
             "file_url": file_url
@@ -112,4 +119,4 @@ def generate_report():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=port, debug=False)

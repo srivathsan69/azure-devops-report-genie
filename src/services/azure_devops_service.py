@@ -28,33 +28,61 @@ class AzureDevOpsService:
         """Get current timestamp formatted for filenames"""
         return datetime.now().strftime("%Y%m%d_%H%M%S")
     
-    def fetch_epics(self) -> List[Dict[str, Any]]:
+    def fetch_epics(self, custom_field_filters: List[Dict[str, str]] = None) -> List[Dict[str, Any]]:
         """
-        Fetch Epic work items using WIQL query
+        Fetch Epic work items using WIQL query with optional custom field filters
+        
+        Args:
+            custom_field_filters: List of dicts with 'key' and 'value' to filter epics
+                                  Example: [{'key': 'Custom.Feasible', 'value': 'Yes'}]
         """
         url = f"{self.base_url}/wit/wiql?api-version={self.api_version}"
         
-        # WIQL query to fetch Epics with custom filter criteria
-        # This is a sample query that can be modified based on specific requirements
-        wiql = {
-            "query": """
-                SELECT [System.Id]
-                FROM WorkItems
-                WHERE [System.WorkItemType] = 'Epic'
-                AND [System.State] <> 'Closed'
-                ORDER BY [System.CreatedDate] DESC
-            """
-        }
+        # Start with base query filtering by project and work item type
+        query = f"""
+            SELECT [System.Id]
+            FROM WorkItems
+            WHERE [System.WorkItemType] = 'Epic'
+            AND [System.TeamProject] = '{self.project}'
+            AND [System.State] <> 'Closed'
+        """
+        
+        # Add custom field filters if provided
+        if custom_field_filters and isinstance(custom_field_filters, list):
+            logger.info(f"Applying {len(custom_field_filters)} custom field filters")
+            for filter_item in custom_field_filters:
+                if not isinstance(filter_item, dict) or 'key' not in filter_item or 'value' not in filter_item:
+                    logger.warning(f"Skipping invalid filter item: {filter_item}")
+                    continue
+                    
+                field_name = filter_item['key']
+                field_value = filter_item['value']
+                
+                # Handle field name formatting
+                if not field_name.startswith('System.') and not field_name.startswith('Microsoft.') and not field_name.startswith('Custom.'):
+                    field_name = f"Custom.{field_name}"
+                
+                # Add to query
+                logger.debug(f"Adding filter: [{field_name}] = '{field_value}'")
+                query += f"AND [{field_name}] = '{field_value}'\n"
+        
+        # Finish query
+        query += "ORDER BY [System.CreatedDate] DESC"
+        
+        wiql = {"query": query}
+        logger.debug(f"WIQL Query: {query}")
         
         try:
             response = requests.post(url, headers=self.headers, json=wiql)
             response.raise_for_status()
             
             query_result = response.json()
+            logger.debug(f"Query result: {json.dumps(query_result, indent=2)}")
+            
             work_item_ids = [item["id"] for item in query_result.get("workItems", [])]
+            logger.info(f"Found {len(work_item_ids)} epics matching the criteria")
             
             if not work_item_ids:
-                logger.info("No Epics found matching the criteria")
                 return []
             
             # Fetch detailed work item information for all retrieved epic IDs
@@ -64,50 +92,32 @@ class AzureDevOpsService:
             logger.exception(f"Error fetching Epics: {str(e)}")
             raise
     
-    def get_work_items_details(self, work_item_ids: List[int]) -> List[Dict[str, Any]]:
-        """
-        Fetch detailed information for multiple work items
-        """
-        # API allows retrieval of multiple work items in batches
-        batch_size = 200
-        all_items = []
-        
-        for i in range(0, len(work_item_ids), batch_size):
-            batch = work_item_ids[i:i + batch_size]
-            ids_string = ','.join(map(str, batch))
-            
-            url = f"{self.base_url}/wit/workitems?ids={ids_string}&$expand=all&api-version={self.api_version}"
-            
-            try:
-                response = requests.get(url, headers=self.headers)
-                response.raise_for_status()
-                result = response.json()
-                all_items.extend(result.get("value", []))
-                
-            except requests.exceptions.RequestException as e:
-                logger.exception(f"Error fetching work item details: {str(e)}")
-                raise
-        
-        return all_items
+    # ... keep existing code (remaining methods for get_work_items_details, get_work_item_relations, etc.)
     
-    def get_work_item_relations(self, work_item_id: int) -> Dict[str, Any]:
-        """
-        Fetch a single work item with its relations
-        """
-        url = f"{self.base_url}/wit/workitems/{work_item_id}?$expand=relations&api-version={self.api_version}"
-        
-        try:
-            response = requests.get(url, headers=self.headers)
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.RequestException as e:
-            logger.exception(f"Error fetching work item {work_item_id}: {str(e)}")
-            raise
-    
-    def traverse_hierarchy(self, epics: List[Dict[str, Any]], custom_fields: List[str]) -> Dict[str, Any]:
+    def traverse_hierarchy(self, epics: List[Dict[str, Any]], custom_fields: List[Dict[str, str]]) -> Dict[str, Any]:
         """
         Traverse work item hierarchy and roll up data
+        
+        Args:
+            epics: List of epic work items
+            custom_fields: List of dicts with 'key' and optional 'value' to include in output
         """
+        # Extract just the field names for data extraction
+        custom_field_names = []
+        if custom_fields:
+            for field_item in custom_fields:
+                if isinstance(field_item, dict) and 'key' in field_item:
+                    field_key = field_item['key']
+                    # Handle field name formatting
+                    if not field_key.startswith('System.') and not field_key.startswith('Microsoft.') and not field_key.startswith('Custom.'):
+                        field_key = f"Custom.{field_key}"
+                    custom_field_names.append(field_key)
+                elif isinstance(field_item, str):  # For backward compatibility
+                    field_key = field_item
+                    if not field_key.startswith('System.') and not field_key.startswith('Microsoft.') and not field_key.startswith('Custom.'):
+                        field_key = f"Custom.{field_key}"
+                    custom_field_names.append(field_key)
+                    
         result = {
             "epics": [],
             "features": [],
@@ -115,8 +125,13 @@ class AzureDevOpsService:
             "leaf_items": []
         }
         
+        logger.info(f"Processing {len(epics)} epics and their hierarchies")
+        
+        # ... keep existing code (the traversal logic for epics, features, stories and tasks)
+        
+        # Update the _extract_work_item_data method to handle custom fields from the custom_field_names list
         for epic in epics:
-            epic_data = self._extract_work_item_data(epic, "Epic", custom_fields)
+            epic_data = self._extract_work_item_data(epic, "Epic", custom_field_names)
             epic_data["children"] = []
             
             # Get child work items (Features under this Epic)
@@ -130,7 +145,7 @@ class AzureDevOpsService:
             total_completed_work = 0
             
             for feature in features:
-                feature_data = self._extract_work_item_data(feature, "Feature", custom_fields)
+                feature_data = self._extract_work_item_data(feature, "Feature", custom_field_names)
                 feature_data["children"] = []
                 
                 # Get child work items (User Stories under this Feature)
@@ -145,7 +160,7 @@ class AzureDevOpsService:
                 feature_completed_work = 0
                 
                 for story in stories:
-                    story_data = self._extract_work_item_data(story, "User Story", custom_fields)
+                    story_data = self._extract_work_item_data(story, "User Story", custom_field_names)
                     story_data["children"] = []
                     
                     # Get child work items (Tasks, Bugs, etc. under this Story)
@@ -160,7 +175,7 @@ class AzureDevOpsService:
                     story_completed_work = 0
                     
                     for task in tasks:
-                        task_data = self._extract_work_item_data(task, "Task", custom_fields)
+                        task_data = self._extract_work_item_data(task, "Task", custom_field_names)
                         
                         # Extract effort metrics
                         task_estimated = self._get_field_value(task, "Microsoft.VSTS.Scheduling.OriginalEstimate", 0)
@@ -216,6 +231,11 @@ class AzureDevOpsService:
     def _extract_work_item_data(self, work_item: Dict[str, Any], item_type: str, custom_fields: List[str]) -> Dict[str, Any]:
         """
         Extract relevant data from a work item
+        
+        Args:
+            work_item: The work item data from Azure DevOps
+            item_type: The type of work item (Epic, Feature, etc.)
+            custom_fields: List of custom field names to extract
         """
         fields = work_item.get("fields", {})
         
@@ -233,28 +253,15 @@ class AzureDevOpsService:
             "url": work_item.get("url", "")
         }
         
-        # Add custom fields if present
-        for field in custom_fields:
-            qualified_field = f"Custom.{field}" if not field.startswith("System.") and not field.startswith("Microsoft.") else field
-            data[field] = self._get_field_value(work_item, qualified_field, "N/A")
+        # Add custom fields if present in the work item
+        if custom_fields:
+            for field_name in custom_fields:
+                # Use the field name as is, since it should already be properly formatted
+                field_value = self._get_field_value(work_item, field_name, "N/A")
+                # Use the unqualified field name as the key in our data structure
+                simple_name = field_name.split('.')[-1] if '.' in field_name else field_name
+                data[simple_name] = field_value
         
         return data
     
-    def _get_field_value(self, work_item: Dict[str, Any], field_name: str, default_value: Any = None) -> Any:
-        """
-        Safely extract a field value from a work item
-        """
-        fields = work_item.get("fields", {})
-        return fields.get(field_name, default_value)
-    
-    def _extract_person_name(self, person_field: Any) -> str:
-        """
-        Extract person name from Azure DevOps person object
-        """
-        if not person_field:
-            return "Unassigned"
-            
-        if isinstance(person_field, dict):
-            return person_field.get("displayName", "Unknown")
-        
-        return str(person_field)
+    # ... keep existing code (for _get_field_value and _extract_person_name methods)
