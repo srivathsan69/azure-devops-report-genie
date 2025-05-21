@@ -7,18 +7,137 @@ from services.azure_devops_service import AzureDevOpsService
 from services.report_service import ReportService
 from services.storage_service import AzureBlobStorageService
 from services.logging_service import setup_logging
+from flasgger import Swagger
 
 # Configure logging
 logger = setup_logging(log_level=logging.INFO)
 
 app = Flask(__name__)
 
-@app.route('/health', methods=['GET'])
+# Configure Swagger
+swagger_config = {
+    "headers": [],
+    "specs": [
+        {
+            "endpoint": 'apispec',
+            "route": '/ado-report/apispec.json',
+            "rule_filter": lambda rule: True,
+            "model_filter": lambda tag: True,
+        }
+    ],
+    "static_url_path": "/ado-report/flasgger_static",
+    "swagger_ui": True,
+    "specs_route": "/ado-report/docs"
+}
+
+swagger = Swagger(app, config=swagger_config, template={
+    "info": {
+        "title": "Azure DevOps Report Generator API",
+        "description": "API for generating Excel reports from Azure DevOps work items",
+        "version": "1.0.0",
+        "contact": {
+            "email": "admin@example.com"
+        }
+    },
+    "schemes": ["http", "https"]
+})
+
+@app.route('/ado-report/health', methods=['GET'])
 def health_check():
+    """
+    Health check endpoint
+    Returns a 200 status code if the service is healthy
+    ---
+    responses:
+      200:
+        description: Service is healthy
+    """
     return jsonify({"status": "healthy"}), 200
 
+@app.route('/health', methods=['GET'])
+def legacy_health_check():
+    """Legacy health check endpoint that redirects to the new path"""
+    return health_check()
+
+@app.route('/ado-report/generate-report', methods=['POST'])
+def generate_report_api():
+    """
+    Generate Azure DevOps work item report
+    ---
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - AZURE_PAT
+            - ORGANIZATION
+            - PROJECT
+            - storage_account_name
+            - container_name
+            - storage_account_sas
+          properties:
+            AZURE_PAT:
+              type: string
+              description: Azure DevOps Personal Access Token
+            ORGANIZATION:
+              type: string
+              description: Azure DevOps Organization name
+            PROJECT:
+              type: string
+              description: Azure DevOps Project name
+            CUSTOM_FIELDS:
+              type: array
+              description: List of custom field objects with key and value for filtering
+              items:
+                type: object
+                properties:
+                  key:
+                    type: string
+                    description: Custom field name
+                  value:
+                    type: string
+                    description: Custom field value for filtering
+            SHEET_COUNT:
+              type: integer
+              description: Number of sheets to include in the report (1-4)
+              default: 4
+            storage_account_name:
+              type: string
+              description: Azure Storage account name
+            container_name:
+              type: string
+              description: Azure Storage container name
+            storage_account_sas:
+              type: string
+              description: SAS token for Azure Storage authentication
+    responses:
+      200:
+        description: Report generated successfully
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+              description: Success message
+            file_url:
+              type: string
+              description: URL to the generated report
+      400:
+        description: Bad request - missing required parameters
+      500:
+        description: Internal server error
+    """
+    return generate_report()
+
 @app.route('/api/generate-report', methods=['POST'])
+def legacy_generate_report():
+    """Legacy endpoint that redirects to the new path"""
+    return generate_report()
+
 def generate_report():
+    """Shared implementation of the report generation endpoint"""
     try:
         # Extract parameters from JSON request
         data = request.get_json()
