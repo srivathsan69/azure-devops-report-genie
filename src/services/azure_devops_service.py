@@ -1,3 +1,4 @@
+
 import requests
 import base64
 import json
@@ -37,334 +38,320 @@ class AzureDevOpsService:
         Returns:
             Properly formatted field reference for WIQL query
         """
-        # System fields use a different format
-        if field_name.startswith('System.') or field_name.startswith('Microsoft.'):
-            return f"[{field_name}]"
-
-        # For custom fields, we need special handling
+        # Extract the proper field name (with or without 'Custom.' prefix)
         if field_name.startswith('Custom.'):
-            field_without_prefix = field_name[7:]  # Remove 'Custom.' prefix
-            # In Azure DevOps, custom fields are actually referenced by their name without the "Custom." prefix
-            return f"[{field_without_prefix}]"
-        
-        # Default case - just the field name with brackets
-        return f"[{field_name}]"
+            # Use the original field name including the prefix
+            # Azure DevOps requires fields to be referenced as [Custom.FieldName] in WIQL
+            return f"[{field_name}]"
+        elif field_name.startswith('System.') or field_name.startswith('Microsoft.'):
+            # System and Microsoft fields use their full name
+            return f"[{field_name}]"
+        else:
+            # For custom fields without the 'Custom.' prefix, add it
+            return f"[Custom.{field_name}]"
     
     def fetch_epics(self, custom_field_filters: List[Dict[str, str]] = None, filter_date: str = None) -> List[Dict[str, Any]]:
         """
-        Fetch Epic work items using WIQL query with optional custom field filters and date filter
+        Fetch Epics from Azure DevOps with optional custom field and date filtering
         
         Args:
-            custom_field_filters: List of dicts with 'key' and 'value' to filter epics
-                                  Example: [{'key': 'Custom.Feasible', 'value': 'Yes'}]
-            filter_date: Optional date string (YYYY-MM-DD) to filter work items created on or after this date
+            custom_field_filters: List of objects with key-value pairs for custom field filtering
+            filter_date: Optional date string (YYYY-MM-DD) to filter work items created on or after
+            
+        Returns:
+            List of Epic work items with their fields
         """
-        url = f"{self.base_url}/wit/wiql?api-version={self.api_version}"
-        
-        # Start with base query filtering by project and work item type
-        query = f"""
-            SELECT [System.Id]
-            FROM WorkItems
-            WHERE [System.WorkItemType] = 'Epic'
-            AND [System.TeamProject] = '{self.project}'
-            AND [System.State] <> 'Closed'
-        """
+        # Base WIQL query to fetch Epic work items
+        wiql = {
+            "query": "SELECT [System.Id], [System.Title], [System.State], [System.CreatedDate], [System.AssignedTo] FROM WorkItems WHERE [System.WorkItemType] = 'Epic'"
+        }
         
         # Add date filter if provided
         if filter_date:
-            try:
-                # Validate date format
-                datetime.strptime(filter_date, '%Y-%m-%d')
-                logger.info(f"Filtering work items created on or after {filter_date}")
-                query += f"AND [System.CreatedDate] >= '{filter_date}'\n"
-            except ValueError:
-                logger.warning(f"Invalid date format for filter_date: {filter_date}. Expected YYYY-MM-DD. Ignoring date filter.")
+            logger.info(f"Filtering work items created on or after {filter_date}")
+            wiql["query"] += f" AND [System.CreatedDate] >= '{filter_date}'"
         
         # Add custom field filters if provided
-        if custom_field_filters and isinstance(custom_field_filters, list):
+        if custom_field_filters:
             logger.info(f"Applying {len(custom_field_filters)} custom field filters")
-            try:
-                for filter_item in custom_field_filters:
-                    if not isinstance(filter_item, dict) or 'key' not in filter_item or 'value' not in filter_item:
-                        logger.warning(f"Skipping invalid filter item: {filter_item}")
-                        continue
-                        
-                    field_name = filter_item['key']
-                    field_value = filter_item['value']
+            for field in custom_field_filters:
+                if "key" in field and "value" in field:
+                    field_name = field["key"]
+                    field_value = field["value"]
                     
-                    # Use the helper method to format the field name correctly for WIQL
-                    formatted_field = self._get_field_reference(field_name)
+                    field_ref = self._get_field_reference(field_name)
+                    # For string values, wrap in single quotes
+                    if isinstance(field_value, str):
+                        field_value = f"'{field_value}'"
                     
-                    # Add to query - use equals operators for exact match
-                    logger.debug(f"Adding filter: {formatted_field} = '{field_value}'")
-                    query += f"AND {formatted_field} = '{field_value}'\n"
-            
-                # Log the complete query for debugging
-                logger.debug(f"Complete WIQL query: {query}")
-            except Exception as e:
-                logger.error(f"Error building custom field filter: {str(e)}")
-                raise
-        
-        # Finish query
-        query += "ORDER BY [System.CreatedDate] DESC"
-        
-        wiql = {"query": query}
+                    wiql["query"] += f" AND {field_ref} = {field_value}"
         
         try:
-            # Add more detailed logging to help diagnose issues
-            logger.debug(f"Sending WIQL query: {json.dumps(wiql)}")
-            response = requests.post(url, headers=self.headers, json=wiql)
-            # Log response for debugging
-            logger.debug(f"WIQL API Response Status: {response.status_code}")
+            # Log the WIQL query for debugging
+            logger.debug(f"WIQL Query: {wiql['query']}")
             
-            if response.status_code != 200:
-                logger.error(f"Error response from WIQL API: {response.text}")
+            # Make API call to execute WIQL query
+            response = requests.post(
+                f"{self.base_url}/wit/wiql?api-version={self.api_version}",
+                headers=self.headers,
+                json=wiql
+            )
             
-            response.raise_for_status()
+            # Check for error in the response
+            if not response.ok:
+                try:
+                    error_data = response.json()
+                    logger.error(f"Error response from WIQL API: {json.dumps(error_data)}")
+                except:
+                    logger.error(f"Error response from WIQL API: {response.text}")
+                
+                response.raise_for_status()
             
-            query_result = response.json()
-            
-            work_item_ids = [item["id"] for item in query_result.get("workItems", [])]
-            logger.info(f"Found {len(work_item_ids)} epics matching the criteria")
+            # Parse response and extract work item IDs
+            data = response.json()
+            work_item_ids = [item["id"] for item in data.get("workItems", [])]
             
             if not work_item_ids:
+                logger.info("No Epic work items found matching the criteria")
                 return []
             
-            # Fetch detailed work item information for all retrieved epic IDs
-            return self.get_work_items_details(work_item_ids)
+            logger.info(f"Found {len(work_item_ids)} Epic work items")
+            
+            # Fetch detailed work item data for the IDs
+            return self._get_work_items_details(work_item_ids)
             
         except requests.exceptions.RequestException as e:
-            logger.exception(f"Error fetching Epics: {str(e)}")
+            logger.error(f"Error fetching Epics: {str(e)}")
             raise
     
-    def get_work_items_details(self, work_item_ids: List[int]) -> List[Dict[str, Any]]:
+    def _get_work_items_details(self, work_item_ids: List[int]) -> List[Dict[str, Any]]:
         """
-        Get detailed information for the specified work items
+        Get detailed information for multiple work items
         
         Args:
-            work_item_ids: List of work item IDs
-        """
-        if not work_item_ids:
-            return []
+            work_item_ids: List of work item IDs to fetch details for
             
-        # Azure DevOps API has a limit on the number of IDs in a single request
+        Returns:
+            List of work items with detailed information
+        """
+        # Batch requests in groups of 200 (Azure DevOps API limit)
         batch_size = 200
-        batched_ids = [work_item_ids[i:i + batch_size] for i in range(0, len(work_item_ids), batch_size)]
+        all_items = []
         
-        all_work_items = []
-        
-        for batch in batched_ids:
-            ids_string = ",".join(map(str, batch))
-            url = f"{self.base_url}/wit/workitems?ids={ids_string}&$expand=relations&api-version={self.api_version}"
+        for i in range(0, len(work_item_ids), batch_size):
+            batch_ids = work_item_ids[i:i+batch_size]
+            ids_string = ",".join(map(str, batch_ids))
             
             try:
-                response = requests.get(url, headers=self.headers)
+                # Request work item details with all fields
+                response = requests.get(
+                    f"{self.base_url}/wit/workitems?ids={ids_string}&$expand=all&api-version={self.api_version}",
+                    headers=self.headers
+                )
                 response.raise_for_status()
                 
-                batch_results = response.json().get("value", [])
-                all_work_items.extend(batch_results)
+                batch_data = response.json()
+                all_items.extend(batch_data.get("value", []))
                 
             except requests.exceptions.RequestException as e:
-                logger.exception(f"Error fetching work item details: {str(e)}")
+                logger.error(f"Error fetching work item details: {str(e)}")
                 raise
-                
-        return all_work_items
+        
+        # Transform response into a more usable format
+        transformed_items = []
+        for item in all_items:
+            transformed = self._transform_work_item(item)
+            transformed_items.append(transformed)
+        
+        return transformed_items
     
-    def get_work_item_relations(self, work_item_id: int) -> Dict[str, Any]:
+    # ... keep existing code (other methods)
+
+    def _transform_work_item(self, work_item: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Get work item with all its relations
+        Transform a work item response into a more usable format
         
         Args:
-            work_item_id: ID of the work item
-        """
-        url = f"{self.base_url}/wit/workitems/{work_item_id}?$expand=relations&api-version={self.api_version}"
-        
-        try:
-            response = requests.get(url, headers=self.headers)
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.RequestException as e:
-            logger.exception(f"Error fetching work item relations: {str(e)}")
-            raise
-    
-    def traverse_hierarchy(self, epics: List[Dict[str, Any]], custom_fields: List[Dict[str, str]]) -> Dict[str, Any]:
-        """
-        Traverse work item hierarchy and roll up data
-        
-        Args:
-            epics: List of epic work items
-            custom_fields: List of dicts with 'key' and optional 'value' to include in output
-        """
-        # Extract just the field names for data extraction
-        custom_field_names = []
-        if custom_fields:
-            for field_item in custom_fields:
-                if isinstance(field_item, dict) and 'key' in field_item:
-                    field_key = field_item['key']
-                    # Handle field name formatting
-                    if not field_key.startswith('System.') and not field_key.startswith('Microsoft.') and not field_key.startswith('Custom.'):
-                        field_key = f"Custom.{field_key}"
-                    custom_field_names.append(field_key)
-                elif isinstance(field_item, str):  # For backward compatibility
-                    field_key = field_item
-                    if not field_key.startswith('System.') and not field_key.startswith('Microsoft.') and not field_key.startswith('Custom.'):
-                        field_key = f"Custom.{field_key}"
-                    custom_field_names.append(field_key)
-                    
-        result = {
-            "epics": [],
-            "features": [],
-            "stories": [],
-            "leaf_items": []
-        }
-        
-        logger.info(f"Processing {len(epics)} epics and their hierarchies")
-        
-        # Update the _extract_work_item_data method to handle custom fields from the custom_field_names list
-        for epic in epics:
-            epic_data = self._extract_work_item_data(epic, "Epic", custom_field_names)
-            epic_data["children"] = []
+            work_item: Raw work item data from Azure DevOps API
             
-            # Get child work items (Features under this Epic)
-            child_relations = [r for r in epic.get("relations", []) 
-                              if r.get("attributes", {}).get("name") == "Child"]
-            
-            feature_ids = [int(r["url"].split("/")[-1]) for r in child_relations]
-            features = self.get_work_items_details(feature_ids) if feature_ids else []
-            
-            total_estimated_hours = 0
-            total_completed_work = 0
-            
-            for feature in features:
-                feature_data = self._extract_work_item_data(feature, "Feature", custom_field_names)
-                feature_data["children"] = []
-                
-                # Get child work items (User Stories under this Feature)
-                feature_with_relations = self.get_work_item_relations(feature["id"])
-                story_relations = [r for r in feature_with_relations.get("relations", []) 
-                                 if r.get("attributes", {}).get("name") == "Child"]
-                
-                story_ids = [int(r["url"].split("/")[-1]) for r in story_relations]
-                stories = self.get_work_items_details(story_ids) if story_ids else []
-                
-                feature_estimated_hours = 0
-                feature_completed_work = 0
-                
-                for story in stories:
-                    story_data = self._extract_work_item_data(story, "User Story", custom_field_names)
-                    story_data["children"] = []
-                    
-                    # Get child work items (Tasks, Bugs, etc. under this Story)
-                    story_with_relations = self.get_work_item_relations(story["id"])
-                    task_relations = [r for r in story_with_relations.get("relations", []) 
-                                   if r.get("attributes", {}).get("name") == "Child"]
-                    
-                    task_ids = [int(r["url"].split("/")[-1]) for r in task_relations]
-                    tasks = self.get_work_items_details(task_ids) if task_ids else []
-                    
-                    story_estimated_hours = 0
-                    story_completed_work = 0
-                    
-                    for task in tasks:
-                        task_data = self._extract_work_item_data(task, "Task", custom_field_names)
-                        
-                        # Extract effort metrics
-                        task_estimated = self._get_field_value(task, "Microsoft.VSTS.Scheduling.OriginalEstimate", 0)
-                        task_completed = self._get_field_value(task, "Microsoft.VSTS.Scheduling.CompletedWork", 0)
-                        
-                        task_data["estimated_hours"] = task_estimated
-                        task_data["completed_work"] = task_completed
-                        
-                        story_estimated_hours += task_estimated
-                        story_completed_work += task_completed
-                        
-                        # Add to leaf items collection
-                        result["leaf_items"].append(task_data)
-                        
-                        # Add to story's children
-                        story_data["children"].append(task_data)
-                    
-                    # Roll up metrics to story level
-                    story_data["estimated_hours"] = story_estimated_hours
-                    story_data["completed_work"] = story_completed_work
-                    
-                    feature_estimated_hours += story_estimated_hours
-                    feature_completed_work += story_completed_work
-                    
-                    # Add to stories collection
-                    result["stories"].append(story_data)
-                    
-                    # Add to feature's children
-                    feature_data["children"].append(story_data)
-                
-                # Roll up metrics to feature level
-                feature_data["estimated_hours"] = feature_estimated_hours
-                feature_data["completed_work"] = feature_completed_work
-                
-                total_estimated_hours += feature_estimated_hours
-                total_completed_work += feature_completed_work
-                
-                # Add to features collection
-                result["features"].append(feature_data)
-                
-                # Add to epic's children
-                epic_data["children"].append(feature_data)
-            
-            # Roll up metrics to epic level
-            epic_data["estimated_hours"] = total_estimated_hours
-            epic_data["completed_work"] = total_completed_work
-            
-            # Add to epics collection
-            result["epics"].append(epic_data)
-        
-        return result
-    
-    def _extract_work_item_data(self, work_item: Dict[str, Any], item_type: str, custom_fields: List[str]) -> Dict[str, Any]:
-        """
-        Extract relevant data from a work item
-        
-        Args:
-            work_item: The work item data from Azure DevOps
-            item_type: The type of work item (Epic, Feature, etc.)
-            custom_fields: List of custom field names to extract
+        Returns:
+            Transformed work item with simplified field access
         """
         fields = work_item.get("fields", {})
         
-        # Basic work item data
-        data = {
+        # Basic fields that are present in all work items
+        result = {
             "id": work_item.get("id"),
-            "type": item_type,
-            "title": self._get_field_value(work_item, "System.Title", "No Title"),
-            "state": self._get_field_value(work_item, "System.State", "Unknown"),
-            "assigned_to": self._extract_person_name(self._get_field_value(work_item, "System.AssignedTo")),
-            "estimated_hours": 0,  # Will be populated for leaf items or rolled up for parents
-            "completed_work": 0,   # Will be populated for leaf items or rolled up for parents
-            "remaining_work": self._get_field_value(work_item, "Microsoft.VSTS.Scheduling.RemainingWork", 0),
-            "created_date": self._get_field_value(work_item, "System.CreatedDate"),
-            "url": work_item.get("url", "")
+            "url": work_item.get("url"),
+            "type": fields.get("System.WorkItemType", ""),
+            "title": fields.get("System.Title", ""),
+            "state": fields.get("System.State", ""),
+            "created_date": fields.get("System.CreatedDate", ""),
+            "assigned_to": fields.get("System.AssignedTo", {}).get("displayName", "") if isinstance(fields.get("System.AssignedTo"), dict) else fields.get("System.AssignedTo", ""),
         }
         
-        # Add custom fields if present in the work item
-        if custom_fields:
-            for field_name in custom_fields:
-                # Use the field name as is, since it should already be properly formatted
-                field_value = self._get_field_value(work_item, field_name, "N/A")
-                # Use the unqualified field name as the key in our data structure
-                simple_name = field_name.split('.')[-1] if '.' in field_name else field_name
-                data[simple_name] = field_value
+        # Metrics - handle fields that may not exist in some work items
+        result["estimated_hours"] = float(fields.get("Microsoft.VSTS.Scheduling.OriginalEstimate", 0) or 0)
+        result["completed_work"] = float(fields.get("Microsoft.VSTS.Scheduling.CompletedWork", 0) or 0)
+        result["remaining_work"] = float(fields.get("Microsoft.VSTS.Scheduling.RemainingWork", 0) or 0)
         
-        return data
+        # Add all custom fields to the result
+        for field_name, field_value in fields.items():
+            if field_name.startswith("Custom."):
+                simple_name = field_name.split('.')[-1]
+                result[simple_name] = field_value
+        
+        return result
     
-    def _get_field_value(self, work_item: Dict[str, Any], field_name: str, default_value: Any = None) -> Any:
-        """Get field value from work item"""
-        return work_item.get("fields", {}).get(field_name, default_value)
+    def traverse_hierarchy(self, epics: List[Dict[str, Any]], custom_field_filters: List[Dict[str, str]] = None) -> Dict[str, Any]:
+        """
+        Traverse the work item hierarchy starting from epics
+        
+        Args:
+            epics: List of Epic work items to traverse
+            custom_field_filters: List of custom fields to include in results
+            
+        Returns:
+            Hierarchical data structure with all work items
+        """
+        # Lists to store different types of work items
+        features = []
+        stories = []
+        leaf_items = []  # Tasks, bugs, etc.
+        
+        # Process each epic and its children
+        for epic in epics:
+            epic_id = epic["id"]
+            
+            # Get feature children of this epic
+            epic_features = self._get_child_work_items(epic_id)
+            epic["children"] = epic_features
+            
+            # Process each feature and its children
+            for feature in epic_features:
+                feature["epic_id"] = epic_id
+                feature["epic_title"] = epic["title"]
+                features.append(feature)
+                
+                feature_id = feature["id"]
+                
+                # Get user story children of this feature
+                feature_stories = self._get_child_work_items(feature_id)
+                feature["children"] = feature_stories
+                
+                # Process each user story and its children
+                for story in feature_stories:
+                    story["feature_id"] = feature_id
+                    story["feature_title"] = feature["title"]
+                    stories.append(story)
+                    
+                    story_id = story["id"]
+                    
+                    # Get task children of this story
+                    story_tasks = self._get_child_work_items(story_id)
+                    story["children"] = story_tasks
+                    
+                    # Process each task
+                    for task in story_tasks:
+                        task["story_id"] = story_id
+                        task["story_title"] = story["title"]
+                        leaf_items.append(task)
+        
+        # Collect all custom field names from the filter
+        custom_fields = []
+        if custom_field_filters:
+            for field in custom_field_filters:
+                if "key" in field:
+                    field_name = field["key"]
+                    # Strip Custom. prefix if present
+                    if field_name.startswith('Custom.'):
+                        field_name = field_name[7:]  # Remove 'Custom.' prefix
+                    custom_fields.append(field_name)
+        
+        # Roll up metrics from children to parents
+        self._roll_up_metrics(epics)
+        
+        return {
+            "epics": epics,
+            "features": features,
+            "stories": stories,
+            "leaf_items": leaf_items,
+            "custom_fields": custom_fields
+        }
     
-    def _extract_person_name(self, person_data: Any) -> str:
-        """Extract display name from person data"""
-        if not person_data:
-            return "Unassigned"
+    def _get_child_work_items(self, parent_id: int) -> List[Dict[str, Any]]:
+        """
+        Get the child work items of a parent work item
+        
+        Args:
+            parent_id: ID of the parent work item
             
-        if isinstance(person_data, dict) and "displayName" in person_data:
-            return person_data["displayName"]
+        Returns:
+            List of child work items
+        """
+        try:
+            # Query for child IDs using the relationships API
+            response = requests.get(
+                f"{self.base_url}/wit/workitems/{parent_id}?$expand=relations&api-version={self.api_version}",
+                headers=self.headers
+            )
+            response.raise_for_status()
             
-        return str(person_data)
+            data = response.json()
+            
+            # Extract child work item IDs
+            child_ids = []
+            for relation in data.get("relations", []):
+                if relation.get("rel") == "System.LinkTypes.Hierarchy-Forward":
+                    child_url = relation.get("url", "")
+                    if child_url:
+                        # Extract ID from URL
+                        child_id = int(child_url.split("/")[-1])
+                        child_ids.append(child_id)
+            
+            if not child_ids:
+                return []
+            
+            # Get detailed information for child work items
+            return self._get_work_items_details(child_ids)
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error fetching child work items: {str(e)}")
+            return []
+            
+    def _roll_up_metrics(self, items: List[Dict[str, Any]]) -> None:
+        """
+        Roll up metrics from children to parent items
+        
+        This recursively calculates estimated_hours, completed_work, and remaining_work
+        for each level in the hierarchy based on children's values.
+        
+        Args:
+            items: List of work items with children to process
+        """
+        for item in items:
+            children = item.get("children", [])
+            
+            if children:
+                # Recursively process children first
+                self._roll_up_metrics(children)
+                
+                # Roll up metrics from children
+                estimated_hours = sum(child.get("estimated_hours", 0) for child in children)
+                completed_work = sum(child.get("completed_work", 0) for child in children)
+                remaining_work = sum(child.get("remaining_work", 0) for child in children)
+                
+                # Only update if the item doesn't have its own values
+                if not item.get("estimated_hours"):
+                    item["estimated_hours"] = estimated_hours
+                    
+                if not item.get("completed_work"):
+                    item["completed_work"] = completed_work
+                    
+                if not item.get("remaining_work"):
+                    item["remaining_work"] = remaining_work
+            
+            # Calculate percent complete
+            est = item.get("estimated_hours", 0)
+            comp = item.get("completed_work", 0)
+            item["percent_complete"] = comp / est if est > 0 else 0

@@ -15,9 +15,36 @@ import traceback
 # Configure logging
 logger = setup_logging(log_level=logging.INFO)
 
-# ... keep existing code (app initialization and Swagger configuration)
+# Initialize Flask app
+app = Flask(__name__)
 
-# ... keep existing code (health check endpoints)
+# Configure Swagger
+swagger_template = {
+    "info": {
+        "title": "Azure DevOps Work Item Report API",
+        "description": "API for generating reports from Azure DevOps work items",
+        "version": "1.0",
+        "contact": {
+            "name": "API Support"
+        }
+    }
+}
+swagger = Swagger(app, template=swagger_template)
+
+# Health check endpoints for container readiness/liveness probes
+@app.route('/health', methods=['GET'])
+@app.route('/ado-report/health', methods=['GET'])
+def health_check():
+    """
+    Health check endpoint
+    ---
+    responses:
+      200:
+        description: Service is healthy
+    """
+    return jsonify({"status": "healthy"}), 200
+
+# ... keep existing code (report generation endpoint and API documentation)
 
 @app.route('/ado-report/generate-report', methods=['POST'])
 def generate_report_api():
@@ -102,6 +129,8 @@ def legacy_generate_report():
     """Legacy endpoint that redirects to the new path"""
     return generate_report()
 
+# ... keep existing code (generate_report function implementation)
+
 def generate_report():
     """Shared implementation of the report generation endpoint"""
     try:
@@ -165,8 +194,6 @@ def generate_report():
             storage_account_sas
         )
         
-        # ... keep existing code (retrieve epics and handle no epics found case)
-        
         # Step 1: Fetch Epics from Azure DevOps using the custom field filters and date filter
         logger.info("Fetching Epics from Azure DevOps...")
         epics = azure_devops.fetch_epics(custom_fields, filter_date)
@@ -177,8 +204,6 @@ def generate_report():
                 "message": "No Epics found matching the criteria.",
                 "file_url": None
             }), 200
-        
-        # ... keep existing code (process work item hierarchy, generate Excel report, upload to Azure Blob Storage)
         
         # Step 2: Process work item hierarchy and roll up data
         logger.info(f"Processing {len(epics)} Epics and their hierarchies...")

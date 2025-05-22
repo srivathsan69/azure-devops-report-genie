@@ -1,3 +1,4 @@
+
 import xlsxwriter
 import logging
 from typing import Dict, Any, List
@@ -30,6 +31,7 @@ class ReportService:
             # Custom fields will be dynamically added to these columns
         ]
         
+        # ... keep existing code (other column definitions)
         self.feature_columns = [
             {"header": "Epic ID", "field": "epic_id", "width": 10},
             {"header": "Epic", "field": "epic_title", "width": 30},
@@ -171,6 +173,7 @@ class ReportService:
                     self._write_epic_row(epic_sheet, row, epic, row_style, percent_style, date_style)
                     row += 1
             
+            # ... keep existing code (other sheet writing code)
             # Sheet 2: Feature Breakdown
             if sheet_count >= 2:
                 feature_sheet = workbook.add_worksheet('Feature Breakdown')
@@ -254,6 +257,7 @@ class ReportService:
             logger.exception(f"Error building Excel workbook: {str(e)}")
             raise
     
+    # ... keep existing code (writing functions)
     def _write_sheet(self, workbook, sheet, columns, header_style, row_style, percent_style, date_style):
         """
         Write column headers to a sheet and set column widths
