@@ -1,4 +1,3 @@
-
 import requests
 import base64
 import json
@@ -118,6 +117,13 @@ class AzureDevOpsService:
         for item in work_items:
             matches_all_filters = True
             
+            # Debug: Log all available fields for the first item
+            if item == work_items[0]:
+                logger.debug(f"Available fields for Epic {item['id']}: {list(item.get('original_fields', {}).keys())}")
+                # Also log custom fields specifically
+                custom_fields_found = {k: v for k, v in item.get('original_fields', {}).items() if k.startswith('Custom.')}
+                logger.debug(f"Custom fields found: {custom_fields_found}")
+            
             for field_filter in custom_field_filters:
                 if not field_filter.get("key") or "value" not in field_filter:
                     continue
@@ -125,39 +131,49 @@ class AzureDevOpsService:
                 field_name = field_filter["key"]
                 expected_value = field_filter["value"]
                 
-                # Handle field names with or without Custom. prefix
-                field_key = field_name
+                # Find the actual field value
+                actual_value = None
+                
+                # Strategy 1: Check if field name already has Custom. prefix
                 if field_name.startswith("Custom."):
-                    # For fields specified as "Custom.FieldName" in the filter
-                    short_name = field_name[7:]  # Remove "Custom." prefix
-                    
-                    # First check if the simple name exists in transformed item
-                    if short_name in item:
-                        actual_value = item[short_name]
-                    else:
-                        # Otherwise check the original fields
-                        field_key = field_name
-                        actual_value = None
+                    # Look in original_fields with exact key
+                    if "original_fields" in item:
+                        actual_value = item["original_fields"].get(field_name)
                         
-                        # Look in the original fields dictionary if it was preserved
-                        if "original_fields" in item:
-                            actual_value = item["original_fields"].get(field_name)
+                    # Also check the simplified name in the item
+                    simple_name = field_name[7:]  # Remove "Custom." prefix
+                    if actual_value is None and simple_name in item:
+                        actual_value = item[simple_name]
                 else:
-                    # For fields specified without prefix, check both with and without custom prefix
+                    # Strategy 2: Field name without prefix - check both ways
+                    # First check the item directly
                     if field_name in item:
                         actual_value = item[field_name]
-                    elif f"Custom.{field_name}" in item.get("original_fields", {}):
+                    
+                    # Then check with Custom. prefix in original_fields
+                    if actual_value is None and "original_fields" in item:
                         actual_value = item["original_fields"].get(f"Custom.{field_name}")
-                    else:
-                        actual_value = None
                 
-                # Compare values
-                if actual_value is None or str(actual_value).lower() != str(expected_value).lower():
+                # Debug logging for field matching
+                logger.debug(f"Field '{field_name}': expected='{expected_value}', actual='{actual_value}'")
+                
+                # Compare values (case-insensitive)
+                if actual_value is None:
+                    logger.debug(f"Field '{field_name}' not found in Epic {item['id']}")
                     matches_all_filters = False
                     break
+                elif str(actual_value).strip().lower() != str(expected_value).strip().lower():
+                    logger.debug(f"Field '{field_name}' value mismatch in Epic {item['id']}: '{actual_value}' != '{expected_value}'")
+                    matches_all_filters = False
+                    break
+                else:
+                    logger.debug(f"Field '{field_name}' matches in Epic {item['id']}")
             
             if matches_all_filters:
+                logger.debug(f"Epic {item['id']} matches all filters")
                 filtered_items.append(item)
+            else:
+                logger.debug(f"Epic {item['id']} filtered out")
                 
         return filtered_items
     
@@ -240,8 +256,59 @@ class AzureDevOpsService:
         
         return result
     
-    # ... keep existing code (other methods)
-
+    def _get_child_work_items(self, parent_id: int) -> List[Dict[str, Any]]:
+        """
+        Get child work items for a given parent work item
+        
+        Args:
+            parent_id: ID of the parent work item
+            
+        Returns:
+            List of child work items with their details
+        """
+        try:
+            # Use WIQL to find child work items
+            wiql = {
+                "query": f"""
+                SELECT [System.Id] 
+                FROM WorkItemLinks 
+                WHERE ([Source].[System.Id] = {parent_id}) 
+                AND ([System.Links.LinkType] = 'System.LinkTypes.Hierarchy-Forward') 
+                MODE (Recursive)
+                """
+            }
+            
+            # Execute WIQL query
+            response = requests.post(
+                f"{self.base_url}/wit/wiql?api-version={self.api_version}",
+                headers=self.headers,
+                json=wiql
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            # Extract child work item IDs from the workItemRelations
+            child_ids = []
+            work_item_relations = data.get("workItemRelations", [])
+            
+            for relation in work_item_relations:
+                # Skip the source item (parent)
+                if relation.get("source") is not None:
+                    target = relation.get("target")
+                    if target and target.get("id"):
+                        child_ids.append(target["id"])
+            
+            if not child_ids:
+                return []
+            
+            # Get detailed information for child work items
+            return self._get_work_items_details(child_ids)
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error fetching child work items for parent {parent_id}: {str(e)}")
+            return []
+    
     def _roll_up_metrics(self, items: List[Dict[str, Any]]) -> None:
         """
         Roll up metrics from children to parent items
