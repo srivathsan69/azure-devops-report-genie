@@ -9,56 +9,15 @@ from services.report_service import ReportService
 from services.storage_service import AzureBlobStorageService
 from services.logging_service import setup_logging
 from flasgger import Swagger
+import json
+import traceback
 
 # Configure logging
 logger = setup_logging(log_level=logging.INFO)
 
-app = Flask(__name__)
+# ... keep existing code (app initialization and Swagger configuration)
 
-# Configure Swagger
-swagger_config = {
-    "headers": [],
-    "specs": [
-        {
-            "endpoint": 'apispec',
-            "route": '/ado-report/apispec.json',
-            "rule_filter": lambda rule: True,
-            "model_filter": lambda tag: True,
-        }
-    ],
-    "static_url_path": "/ado-report/flasgger_static",
-    "swagger_ui": True,
-    "specs_route": "/ado-report/docs"
-}
-
-swagger = Swagger(app, config=swagger_config, template={
-    "info": {
-        "title": "Azure DevOps Report Generator API",
-        "description": "API for generating Excel reports from Azure DevOps work items",
-        "version": "1.0.0",
-        "contact": {
-            "email": "admin@example.com"
-        }
-    },
-    "schemes": ["http", "https"]
-})
-
-@app.route('/ado-report/health', methods=['GET'])
-def health_check():
-    """
-    Health check endpoint
-    Returns a 200 status code if the service is healthy
-    ---
-    responses:
-      200:
-        description: Service is healthy
-    """
-    return jsonify({"status": "healthy"}), 200
-
-@app.route('/health', methods=['GET'])
-def legacy_health_check():
-    """Legacy health check endpoint that redirects to the new path"""
-    return health_check()
+# ... keep existing code (health check endpoints)
 
 @app.route('/ado-report/generate-report', methods=['POST'])
 def generate_report_api():
@@ -96,7 +55,7 @@ def generate_report_api():
                 properties:
                   key:
                     type: string
-                    description: Custom field name
+                    description: Custom field name (prefix 'Custom.' is optional for custom fields)
                   value:
                     type: string
                     description: Custom field value for filtering
@@ -160,7 +119,7 @@ def generate_report():
         custom_fields = data.get('CUSTOM_FIELDS', [])
         sheet_count = int(data.get('SHEET_COUNT', 4))
         filter_date = data.get('filter_date')  # Date filtering parameter
-        output_file_name = data.get('output_file_name')  # New parameter for custom filename
+        output_file_name = data.get('output_file_name')  # Custom filename parameter
         
         # Storage account parameters
         storage_account_name = data.get('storage_account_name')
@@ -206,6 +165,8 @@ def generate_report():
             storage_account_sas
         )
         
+        # ... keep existing code (retrieve epics and handle no epics found case)
+        
         # Step 1: Fetch Epics from Azure DevOps using the custom field filters and date filter
         logger.info("Fetching Epics from Azure DevOps...")
         epics = azure_devops.fetch_epics(custom_fields, filter_date)
@@ -216,6 +177,8 @@ def generate_report():
                 "message": "No Epics found matching the criteria.",
                 "file_url": None
             }), 200
+        
+        # ... keep existing code (process work item hierarchy, generate Excel report, upload to Azure Blob Storage)
         
         # Step 2: Process work item hierarchy and roll up data
         logger.info(f"Processing {len(epics)} Epics and their hierarchies...")
@@ -258,9 +221,13 @@ def generate_report():
         
     except Exception as e:
         logger.exception("Error generating report")
-        return jsonify({
-            "error": f"Failed to generate report: {str(e)}"
-        }), 500
+        # Provide more detailed error information in the response
+        error_details = {
+            "error": f"Failed to generate report: {str(e)}",
+            "type": type(e).__name__,
+            "traceback": traceback.format_exc()
+        }
+        return jsonify(error_details), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

@@ -26,6 +26,29 @@ class AzureDevOpsService:
     def get_timestamp(self) -> str:
         """Get current timestamp formatted for filenames"""
         return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    def _get_field_reference(self, field_name: str) -> str:
+        """
+        Format field names for WIQL query according to Azure DevOps rules
+        
+        Args:
+            field_name: The name of the field to format
+        
+        Returns:
+            Properly formatted field reference for WIQL query
+        """
+        # System fields use a different format
+        if field_name.startswith('System.') or field_name.startswith('Microsoft.'):
+            return f"[{field_name}]"
+
+        # For custom fields, we need special handling
+        if field_name.startswith('Custom.'):
+            field_without_prefix = field_name[7:]  # Remove 'Custom.' prefix
+            # In Azure DevOps, custom fields are actually referenced by their name without the "Custom." prefix
+            return f"[{field_without_prefix}]"
+        
+        # Default case - just the field name with brackets
+        return f"[{field_name}]"
     
     def fetch_epics(self, custom_field_filters: List[Dict[str, str]] = None, filter_date: str = None) -> List[Dict[str, Any]]:
         """
@@ -69,22 +92,12 @@ class AzureDevOpsService:
                     field_name = filter_item['key']
                     field_value = filter_item['value']
                     
-                    # Handle field name formatting - ensure it's properly formatted for WIQL
-                    if not field_name.startswith('System.') and not field_name.startswith('Microsoft.'):
-                        # For custom fields, escape field names with single quotes if they contain spaces
-                        if ' ' in field_name:
-                            # Remove any Custom. prefix if it exists
-                            if field_name.startswith('Custom.'):
-                                clean_name = field_name[7:]
-                            else:
-                                clean_name = field_name
-                            field_name = f"[Custom.'{clean_name}']"
-                        elif not field_name.startswith('Custom.'):
-                            field_name = f"Custom.{field_name}"
+                    # Use the helper method to format the field name correctly for WIQL
+                    formatted_field = self._get_field_reference(field_name)
                     
                     # Add to query - use equals operators for exact match
-                    logger.debug(f"Adding filter: {field_name} = '{field_value}'")
-                    query += f"AND {field_name} = '{field_value}'\n"
+                    logger.debug(f"Adding filter: {formatted_field} = '{field_value}'")
+                    query += f"AND {formatted_field} = '{field_value}'\n"
             
                 # Log the complete query for debugging
                 logger.debug(f"Complete WIQL query: {query}")
@@ -98,9 +111,12 @@ class AzureDevOpsService:
         wiql = {"query": query}
         
         try:
+            # Add more detailed logging to help diagnose issues
+            logger.debug(f"Sending WIQL query: {json.dumps(wiql)}")
             response = requests.post(url, headers=self.headers, json=wiql)
             # Log response for debugging
             logger.debug(f"WIQL API Response Status: {response.status_code}")
+            
             if response.status_code != 200:
                 logger.error(f"Error response from WIQL API: {response.text}")
             

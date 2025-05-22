@@ -186,7 +186,7 @@ print(response.json())
 - **ORGANIZATION**: Azure DevOps Organization name
 - **PROJECT**: Azure DevOps Project name
 - **CUSTOM_FIELDS**: List of objects with key-value pairs for custom field filtering:
-  - **key**: Custom field name
+  - **key**: Custom field name (with or without 'Custom.' prefix)
   - **value**: Custom field value to filter on
 - **filter_date**: Optional date string (YYYY-MM-DD) to filter work items created on or after this date
 - **output_file_name**: Optional custom filename for the output report (without extension)
@@ -198,6 +198,34 @@ print(response.json())
 - **storage_account_name**: Azure Storage account name
 - **container_name**: Azure Storage container name
 - **storage_account_sas**: SAS token for Azure Storage authentication
+
+## Custom Fields in Azure DevOps
+
+### Field Name Formatting
+
+When using the `CUSTOM_FIELDS` parameter:
+
+1. **Custom Fields**: You can use either format:
+   - With prefix: `Custom.YourFieldName`
+   - Without prefix: `YourFieldName` (the system will add the prefix)
+
+2. **System Fields**: Always use the full name with correct prefix:
+   - System fields: `System.CreatedDate`, `System.State`, etc.
+   - Microsoft fields: `Microsoft.VSTS.Common.Priority`, etc.
+
+3. **Fields with Spaces**: Custom fields with spaces in their names are handled automatically:
+   ```json
+   {
+     "key": "Custom.Business Value",
+     "value": "High"
+   }
+   ```
+
+### Tips for Custom Fields
+
+- Use exact field names as they appear in Azure DevOps
+- Field names and values are case-sensitive
+- For fields with spaces or special characters, include the entire field name
 
 ## Logging
 
