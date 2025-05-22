@@ -28,31 +28,9 @@ class AzureDevOpsService:
         """Get current timestamp formatted for filenames"""
         return datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    def _get_field_reference(self, field_name: str) -> str:
-        """
-        Format field names for WIQL query according to Azure DevOps rules
-        
-        Args:
-            field_name: The name of the field to format
-        
-        Returns:
-            Properly formatted field reference for WIQL query
-        """
-        # Extract the proper field name (with or without 'Custom.' prefix)
-        if field_name.startswith('Custom.'):
-            # Use the original field name including the prefix
-            # Azure DevOps requires fields to be referenced as [Custom.FieldName] in WIQL
-            return f"[{field_name}]"
-        elif field_name.startswith('System.') or field_name.startswith('Microsoft.'):
-            # System and Microsoft fields use their full name
-            return f"[{field_name}]"
-        else:
-            # For custom fields without the 'Custom.' prefix, add it
-            return f"[Custom.{field_name}]"
-    
     def fetch_epics(self, custom_field_filters: List[Dict[str, str]] = None, filter_date: str = None) -> List[Dict[str, Any]]:
         """
-        Fetch Epics from Azure DevOps with optional custom field and date filtering
+        Fetch Epics from Azure DevOps with filtering done locally
         
         Args:
             custom_field_filters: List of objects with key-value pairs for custom field filtering
@@ -61,30 +39,15 @@ class AzureDevOpsService:
         Returns:
             List of Epic work items with their fields
         """
-        # Base WIQL query to fetch Epic work items
+        # Base WIQL query to fetch only Epic work items
         wiql = {
-            "query": "SELECT [System.Id], [System.Title], [System.State], [System.CreatedDate], [System.AssignedTo] FROM WorkItems WHERE [System.WorkItemType] = 'Epic'"
+            "query": "SELECT [System.Id] FROM WorkItems WHERE [System.WorkItemType] = 'Epic'"
         }
         
-        # Add date filter if provided
+        # Add date filter if provided - this is simple enough to include in the query
         if filter_date:
             logger.info(f"Filtering work items created on or after {filter_date}")
             wiql["query"] += f" AND [System.CreatedDate] >= '{filter_date}'"
-        
-        # Add custom field filters if provided
-        if custom_field_filters:
-            logger.info(f"Applying {len(custom_field_filters)} custom field filters")
-            for field in custom_field_filters:
-                if "key" in field and "value" in field:
-                    field_name = field["key"]
-                    field_value = field["value"]
-                    
-                    field_ref = self._get_field_reference(field_name)
-                    # For string values, wrap in single quotes
-                    if isinstance(field_value, str):
-                        field_value = f"'{field_value}'"
-                    
-                    wiql["query"] += f" AND {field_ref} = {field_value}"
         
         try:
             # Log the WIQL query for debugging
@@ -112,17 +75,91 @@ class AzureDevOpsService:
             work_item_ids = [item["id"] for item in data.get("workItems", [])]
             
             if not work_item_ids:
-                logger.info("No Epic work items found matching the criteria")
+                logger.info("No Epic work items found matching the date criteria")
                 return []
             
-            logger.info(f"Found {len(work_item_ids)} Epic work items")
+            logger.info(f"Found {len(work_item_ids)} Epic work items before custom field filtering")
             
             # Fetch detailed work item data for the IDs
-            return self._get_work_items_details(work_item_ids)
+            all_epics = self._get_work_items_details(work_item_ids)
+            
+            # If no custom field filters, return all epics
+            if not custom_field_filters:
+                return all_epics
+            
+            # Apply custom field filters locally
+            logger.info(f"Applying {len(custom_field_filters)} custom field filters locally")
+            filtered_epics = self._filter_work_items_by_custom_fields(all_epics, custom_field_filters)
+            
+            logger.info(f"{len(filtered_epics)} epics remain after applying custom field filters")
+            return filtered_epics
             
         except requests.exceptions.RequestException as e:
             logger.error(f"Error fetching Epics: {str(e)}")
             raise
+    
+    def _filter_work_items_by_custom_fields(self, work_items: List[Dict[str, Any]], 
+                                          custom_field_filters: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+        """
+        Filter work items based on custom field criteria
+        
+        Args:
+            work_items: List of work items to filter
+            custom_field_filters: List of objects with key-value pairs for custom field filtering
+            
+        Returns:
+            Filtered list of work items
+        """
+        if not custom_field_filters:
+            return work_items
+            
+        filtered_items = []
+        
+        for item in work_items:
+            matches_all_filters = True
+            
+            for field_filter in custom_field_filters:
+                if not field_filter.get("key") or "value" not in field_filter:
+                    continue
+                    
+                field_name = field_filter["key"]
+                expected_value = field_filter["value"]
+                
+                # Handle field names with or without Custom. prefix
+                field_key = field_name
+                if field_name.startswith("Custom."):
+                    # For fields specified as "Custom.FieldName" in the filter
+                    short_name = field_name[7:]  # Remove "Custom." prefix
+                    
+                    # First check if the simple name exists in transformed item
+                    if short_name in item:
+                        actual_value = item[short_name]
+                    else:
+                        # Otherwise check the original fields
+                        field_key = field_name
+                        actual_value = None
+                        
+                        # Look in the original fields dictionary if it was preserved
+                        if "original_fields" in item:
+                            actual_value = item["original_fields"].get(field_name)
+                else:
+                    # For fields specified without prefix, check both with and without custom prefix
+                    if field_name in item:
+                        actual_value = item[field_name]
+                    elif f"Custom.{field_name}" in item.get("original_fields", {}):
+                        actual_value = item["original_fields"].get(f"Custom.{field_name}")
+                    else:
+                        actual_value = None
+                
+                # Compare values
+                if actual_value is None or str(actual_value).lower() != str(expected_value).lower():
+                    matches_all_filters = False
+                    break
+            
+            if matches_all_filters:
+                filtered_items.append(item)
+                
+        return filtered_items
     
     def _get_work_items_details(self, work_item_ids: List[int]) -> List[Dict[str, Any]]:
         """
@@ -165,8 +202,6 @@ class AzureDevOpsService:
         
         return transformed_items
     
-    # ... keep existing code (other methods)
-
     def _transform_work_item(self, work_item: Dict[str, Any]) -> Dict[str, Any]:
         """
         Transform a work item response into a more usable format
@@ -188,6 +223,8 @@ class AzureDevOpsService:
             "state": fields.get("System.State", ""),
             "created_date": fields.get("System.CreatedDate", ""),
             "assigned_to": fields.get("System.AssignedTo", {}).get("displayName", "") if isinstance(fields.get("System.AssignedTo"), dict) else fields.get("System.AssignedTo", ""),
+            # Store the original fields for reference in filtering
+            "original_fields": fields
         }
         
         # Metrics - handle fields that may not exist in some work items
@@ -203,6 +240,45 @@ class AzureDevOpsService:
         
         return result
     
+    # ... keep existing code (other methods)
+
+    def _roll_up_metrics(self, items: List[Dict[str, Any]]) -> None:
+        """
+        Roll up metrics from children to parent items
+        
+        This recursively calculates estimated_hours, completed_work, and remaining_work
+        for each level in the hierarchy based on children's values.
+        
+        Args:
+            items: List of work items with children to process
+        """
+        for item in items:
+            children = item.get("children", [])
+            
+            if children:
+                # Recursively process children first
+                self._roll_up_metrics(children)
+                
+                # Roll up metrics from children
+                estimated_hours = sum(child.get("estimated_hours", 0) for child in children)
+                completed_work = sum(child.get("completed_work", 0) for child in children)
+                remaining_work = sum(child.get("remaining_work", 0) for child in children)
+                
+                # Only update if the item doesn't have its own values
+                if not item.get("estimated_hours"):
+                    item["estimated_hours"] = estimated_hours
+                    
+                if not item.get("completed_work"):
+                    item["completed_work"] = completed_work
+                    
+                if not item.get("remaining_work"):
+                    item["remaining_work"] = remaining_work
+            
+            # Calculate percent complete
+            est = item.get("estimated_hours", 0)
+            comp = item.get("completed_work", 0)
+            item["percent_complete"] = comp / est if est > 0 else 0
+
     def traverse_hierarchy(self, epics: List[Dict[str, Any]], custom_field_filters: List[Dict[str, str]] = None) -> Dict[str, Any]:
         """
         Traverse the work item hierarchy starting from epics
@@ -278,80 +354,3 @@ class AzureDevOpsService:
             "leaf_items": leaf_items,
             "custom_fields": custom_fields
         }
-    
-    def _get_child_work_items(self, parent_id: int) -> List[Dict[str, Any]]:
-        """
-        Get the child work items of a parent work item
-        
-        Args:
-            parent_id: ID of the parent work item
-            
-        Returns:
-            List of child work items
-        """
-        try:
-            # Query for child IDs using the relationships API
-            response = requests.get(
-                f"{self.base_url}/wit/workitems/{parent_id}?$expand=relations&api-version={self.api_version}",
-                headers=self.headers
-            )
-            response.raise_for_status()
-            
-            data = response.json()
-            
-            # Extract child work item IDs
-            child_ids = []
-            for relation in data.get("relations", []):
-                if relation.get("rel") == "System.LinkTypes.Hierarchy-Forward":
-                    child_url = relation.get("url", "")
-                    if child_url:
-                        # Extract ID from URL
-                        child_id = int(child_url.split("/")[-1])
-                        child_ids.append(child_id)
-            
-            if not child_ids:
-                return []
-            
-            # Get detailed information for child work items
-            return self._get_work_items_details(child_ids)
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error fetching child work items: {str(e)}")
-            return []
-            
-    def _roll_up_metrics(self, items: List[Dict[str, Any]]) -> None:
-        """
-        Roll up metrics from children to parent items
-        
-        This recursively calculates estimated_hours, completed_work, and remaining_work
-        for each level in the hierarchy based on children's values.
-        
-        Args:
-            items: List of work items with children to process
-        """
-        for item in items:
-            children = item.get("children", [])
-            
-            if children:
-                # Recursively process children first
-                self._roll_up_metrics(children)
-                
-                # Roll up metrics from children
-                estimated_hours = sum(child.get("estimated_hours", 0) for child in children)
-                completed_work = sum(child.get("completed_work", 0) for child in children)
-                remaining_work = sum(child.get("remaining_work", 0) for child in children)
-                
-                # Only update if the item doesn't have its own values
-                if not item.get("estimated_hours"):
-                    item["estimated_hours"] = estimated_hours
-                    
-                if not item.get("completed_work"):
-                    item["completed_work"] = completed_work
-                    
-                if not item.get("remaining_work"):
-                    item["remaining_work"] = remaining_work
-            
-            # Calculate percent complete
-            est = item.get("estimated_hours", 0)
-            comp = item.get("completed_work", 0)
-            item["percent_complete"] = comp / est if est > 0 else 0
