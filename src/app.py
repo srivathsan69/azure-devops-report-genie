@@ -1,3 +1,4 @@
+
 from flask import Flask, request, jsonify
 import logging
 import os
@@ -102,6 +103,9 @@ def generate_report_api():
             filter_date:
               type: string
               description: Optional date string (YYYY-MM-DD) to filter work items created on or after this date
+            output_file_name:
+              type: string
+              description: Optional custom filename for the output report (without extension)
             SHEET_COUNT:
               type: integer
               description: Number of sheets to include in the report (1-4)
@@ -155,7 +159,8 @@ def generate_report():
         # Optional parameters
         custom_fields = data.get('CUSTOM_FIELDS', [])
         sheet_count = int(data.get('SHEET_COUNT', 4))
-        filter_date = data.get('filter_date')  # New parameter for date filtering
+        filter_date = data.get('filter_date')  # Date filtering parameter
+        output_file_name = data.get('output_file_name')  # New parameter for custom filename
         
         # Storage account parameters
         storage_account_name = data.get('storage_account_name')
@@ -231,7 +236,14 @@ def generate_report():
         # Step 4: Upload to Azure Blob Storage
         logger.info("Uploading report to Azure Blob Storage...")
         timestamp = azure_devops.get_timestamp()
-        blob_name = f"azure_devops_report_{timestamp}.xlsx"
+        
+        # Use custom filename if provided, otherwise use the default format
+        if output_file_name:
+            # Ensure the filename is safe by removing any problematic characters
+            safe_filename = ''.join(c for c in output_file_name if c.isalnum() or c in ['-', '_', '.'])
+            blob_name = f"{safe_filename}.xlsx"
+        else:
+            blob_name = f"azure_devops_report_{timestamp}.xlsx"
         
         file_url = storage_service.upload_file(temp_file_path, blob_name)
         

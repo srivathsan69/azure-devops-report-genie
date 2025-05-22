@@ -1,5 +1,4 @@
 
-
 # Azure DevOps Work Item Report Generator
 
 A containerized Python API service that connects to Azure DevOps, rolls up hierarchical work item data, and generates Excel reports.
@@ -109,6 +108,7 @@ docker run -p 5000:5000 azure-devops-reporter
     }
   ],
   "filter_date": "2025-01-01",
+  "output_file_name": "my_custom_report_name",
   "SHEET_COUNT": 4,
   "storage_account_name": "your-storage-account-name",
   "container_name": "your-container-name",
@@ -121,7 +121,7 @@ docker run -p 5000:5000 azure-devops-reporter
 ```json
 {
   "message": "Report generated successfully",
-  "file_url": "https://storage-account.blob.core.windows.net/container/report_20220101_120000.xlsx"
+  "file_url": "https://storage-account.blob.core.windows.net/container/my_custom_report_name.xlsx"
 }
 ```
 
@@ -142,6 +142,7 @@ curl -X POST \
       }
     ],
     "filter_date": "2025-01-01",
+    "output_file_name": "my_custom_report_name",
     "SHEET_COUNT": 4,
     "storage_account_name": "your-storage-account-name",
     "container_name": "your-container-name", 
@@ -167,6 +168,7 @@ payload = {
       }
     ],
     "filter_date": "2025-01-01",
+    "output_file_name": "my_custom_report_name",
     "SHEET_COUNT": 4,
     "storage_account_name": "your-storage-account-name",
     "container_name": "your-container-name",
@@ -187,6 +189,7 @@ print(response.json())
   - **key**: Custom field name
   - **value**: Custom field value to filter on
 - **filter_date**: Optional date string (YYYY-MM-DD) to filter work items created on or after this date
+- **output_file_name**: Optional custom filename for the output report (without extension)
 - **SHEET_COUNT**: Integer (1-4) indicating how many Excel sheets to generate (default = 4)
   - 1: Epic Summary
   - 2: + Feature Breakdown
@@ -230,4 +233,3 @@ The service is designed to be easily customized:
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
-

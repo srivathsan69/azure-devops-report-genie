@@ -1,4 +1,3 @@
-
 import requests
 import base64
 import json
@@ -61,34 +60,53 @@ class AzureDevOpsService:
         # Add custom field filters if provided
         if custom_field_filters and isinstance(custom_field_filters, list):
             logger.info(f"Applying {len(custom_field_filters)} custom field filters")
-            for filter_item in custom_field_filters:
-                if not isinstance(filter_item, dict) or 'key' not in filter_item or 'value' not in filter_item:
-                    logger.warning(f"Skipping invalid filter item: {filter_item}")
-                    continue
+            try:
+                for filter_item in custom_field_filters:
+                    if not isinstance(filter_item, dict) or 'key' not in filter_item or 'value' not in filter_item:
+                        logger.warning(f"Skipping invalid filter item: {filter_item}")
+                        continue
+                        
+                    field_name = filter_item['key']
+                    field_value = filter_item['value']
                     
-                field_name = filter_item['key']
-                field_value = filter_item['value']
-                
-                # Handle field name formatting
-                if not field_name.startswith('System.') and not field_name.startswith('Microsoft.') and not field_name.startswith('Custom.'):
-                    field_name = f"Custom.{field_name}"
-                
-                # Add to query
-                logger.debug(f"Adding filter: [{field_name}] = '{field_value}'")
-                query += f"AND [{field_name}] = '{field_value}'\n"
+                    # Handle field name formatting - ensure it's properly formatted for WIQL
+                    if not field_name.startswith('System.') and not field_name.startswith('Microsoft.'):
+                        # For custom fields, escape field names with single quotes if they contain spaces
+                        if ' ' in field_name:
+                            # Remove any Custom. prefix if it exists
+                            if field_name.startswith('Custom.'):
+                                clean_name = field_name[7:]
+                            else:
+                                clean_name = field_name
+                            field_name = f"[Custom.'{clean_name}']"
+                        elif not field_name.startswith('Custom.'):
+                            field_name = f"Custom.{field_name}"
+                    
+                    # Add to query - use equals operators for exact match
+                    logger.debug(f"Adding filter: {field_name} = '{field_value}'")
+                    query += f"AND {field_name} = '{field_value}'\n"
+            
+                # Log the complete query for debugging
+                logger.debug(f"Complete WIQL query: {query}")
+            except Exception as e:
+                logger.error(f"Error building custom field filter: {str(e)}")
+                raise
         
         # Finish query
         query += "ORDER BY [System.CreatedDate] DESC"
         
         wiql = {"query": query}
-        logger.debug(f"WIQL Query: {query}")
         
         try:
             response = requests.post(url, headers=self.headers, json=wiql)
+            # Log response for debugging
+            logger.debug(f"WIQL API Response Status: {response.status_code}")
+            if response.status_code != 200:
+                logger.error(f"Error response from WIQL API: {response.text}")
+            
             response.raise_for_status()
             
             query_result = response.json()
-            logger.debug(f"Query result: {json.dumps(query_result, indent=2)}")
             
             work_item_ids = [item["id"] for item in query_result.get("workItems", [])]
             logger.info(f"Found {len(work_item_ids)} epics matching the criteria")
