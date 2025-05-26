@@ -1,4 +1,5 @@
 
+
 import requests
 import base64
 import json
@@ -306,9 +307,9 @@ class AzureDevOpsService:
             ids_string = ",".join(map(str, batch_ids))
             
             try:
-                # Request work item details with all fields including custom fields
-                # Using both $expand=all and fields=* to ensure we get everything
-                url = f"{self.base_url}/wit/workitems?ids={ids_string}&$expand=all&fields=*&api-version={self.api_version}"
+                # Request work item details with $expand=all to get all fields including custom fields
+                # Note: Cannot use both $expand=all and fields=* together per Azure DevOps API
+                url = f"{self.base_url}/wit/workitems?ids={ids_string}&$expand=all&api-version={self.api_version}"
                 logger.info(f"API Call 2: GET {url}")
                 
                 response = requests.get(url, headers=self.headers)
@@ -549,3 +550,4 @@ class AzureDevOpsService:
             "leaf_items": leaf_items,
             "custom_fields": custom_fields
         }
+
