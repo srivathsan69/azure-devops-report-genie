@@ -43,7 +43,7 @@ class AzureDevOpsService:
             "query": "SELECT [System.Id] FROM WorkItems WHERE [System.WorkItemType] = 'Epic'"
         }
         
-        # Add date filter if provided - this is simple enough to include in the query
+        # Add date filter if provided
         if filter_date:
             logger.info(f"Filtering work items created on or after {filter_date}")
             wiql["query"] += f" AND [System.CreatedDate] >= '{filter_date}'"
@@ -82,6 +82,9 @@ class AzureDevOpsService:
             # Fetch detailed work item data for the IDs
             all_epics = self._get_work_items_details(work_item_ids)
             
+            # DETAILED LOGGING: Log all fields for each Epic for debugging
+            self._log_epic_fields_for_debugging(all_epics, custom_field_filters)
+            
             # If no custom field filters, return all epics
             if not custom_field_filters:
                 return all_epics
@@ -96,6 +99,101 @@ class AzureDevOpsService:
         except requests.exceptions.RequestException as e:
             logger.error(f"Error fetching Epics: {str(e)}")
             raise
+
+    def _log_epic_fields_for_debugging(self, epics: List[Dict[str, Any]], custom_field_filters: List[Dict[str, str]] = None):
+        """
+        Log detailed field information for each Epic to help with debugging
+        
+        Args:
+            epics: List of Epic work items
+            custom_field_filters: Custom field filters being applied
+        """
+        logger.info("=" * 80)
+        logger.info("DEBUGGING: DETAILED EPIC FIELDS ANALYSIS")
+        logger.info("=" * 80)
+        
+        if custom_field_filters:
+            logger.info(f"Looking for custom field filters:")
+            for i, field_filter in enumerate(custom_field_filters):
+                logger.info(f"  Filter {i+1}: '{field_filter.get('key', 'N/A')}' = '{field_filter.get('value', 'N/A')}'")
+        
+        for epic_idx, epic in enumerate(epics):
+            logger.info(f"\n--- EPIC {epic_idx + 1}: ID {epic.get('id', 'N/A')} ---")
+            logger.info(f"Title: {epic.get('title', 'N/A')}")
+            
+            # Log all original fields from Azure DevOps
+            original_fields = epic.get('original_fields', {})
+            logger.info(f"Total fields available: {len(original_fields)}")
+            
+            # Separate system, Microsoft, and custom fields
+            system_fields = {k: v for k, v in original_fields.items() if k.startswith('System.')}
+            microsoft_fields = {k: v for k, v in original_fields.items() if k.startswith('Microsoft.')}
+            custom_fields = {k: v for k, v in original_fields.items() if k.startswith('Custom.')}
+            other_fields = {k: v for k, v in original_fields.items() if not k.startswith(('System.', 'Microsoft.', 'Custom.'))}
+            
+            logger.info(f"  System fields ({len(system_fields)}): {list(system_fields.keys())}")
+            logger.info(f"  Microsoft fields ({len(microsoft_fields)}): {list(microsoft_fields.keys())}")
+            logger.info(f"  Custom fields ({len(custom_fields)}): {list(custom_fields.keys())}")
+            logger.info(f"  Other fields ({len(other_fields)}): {list(other_fields.keys())}")
+            
+            # Log custom field details
+            if custom_fields:
+                logger.info(f"\n  CUSTOM FIELDS DETAILS:")
+                for field_name, field_value in custom_fields.items():
+                    # Show both the full field name and simplified name
+                    simple_name = field_name[7:] if field_name.startswith('Custom.') else field_name
+                    logger.info(f"    Full name: '{field_name}'")
+                    logger.info(f"    Simple name: '{simple_name}'")
+                    logger.info(f"    Value: '{field_value}'")
+                    logger.info(f"    Value type: {type(field_value)}")
+                    logger.info(f"    ---")
+            else:
+                logger.info(f"  NO CUSTOM FIELDS FOUND")
+            
+            # If we have custom field filters, check matching for this epic
+            if custom_field_filters:
+                logger.info(f"\n  FILTER MATCHING FOR THIS EPIC:")
+                for filter_idx, field_filter in enumerate(custom_field_filters):
+                    filter_key = field_filter.get('key', '')
+                    filter_value = field_filter.get('value', '')
+                    
+                    logger.info(f"    Filter {filter_idx + 1}: Looking for '{filter_key}' = '{filter_value}'")
+                    
+                    # Check all possible field name variations
+                    possible_matches = []
+                    
+                    # Check exact match with Custom. prefix
+                    if f"Custom.{filter_key}" in original_fields:
+                        possible_matches.append(f"Custom.{filter_key}")
+                    
+                    # Check exact match without prefix
+                    if filter_key in original_fields:
+                        possible_matches.append(filter_key)
+                    
+                    # Check if filter_key already has Custom. prefix
+                    if filter_key.startswith('Custom.') and filter_key in original_fields:
+                        possible_matches.append(filter_key)
+                    
+                    # Check partial matches (case insensitive)
+                    for field_name in original_fields.keys():
+                        if field_name.lower().find(filter_key.lower()) != -1:
+                            possible_matches.append(f"PARTIAL_MATCH: {field_name}")
+                    
+                    if possible_matches:
+                        logger.info(f"      Possible matches found: {possible_matches}")
+                        for match in possible_matches:
+                            if not match.startswith('PARTIAL_MATCH:'):
+                                actual_value = original_fields.get(match, 'N/A')
+                                logger.info(f"      '{match}' value: '{actual_value}'")
+                                logger.info(f"      Match check: '{actual_value}' == '{filter_value}' ? {str(actual_value).strip().lower() == str(filter_value).strip().lower()}")
+                    else:
+                        logger.info(f"      NO MATCHES FOUND for '{filter_key}'")
+            
+            logger.info(f"--- END EPIC {epic_idx + 1} ---\n")
+        
+        logger.info("=" * 80)
+        logger.info("END DEBUGGING: DETAILED EPIC FIELDS ANALYSIS")
+        logger.info("=" * 80)
     
     def _filter_work_items_by_custom_fields(self, work_items: List[Dict[str, Any]], 
                                           custom_field_filters: List[Dict[str, str]]) -> List[Dict[str, Any]]:
