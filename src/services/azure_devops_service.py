@@ -1,3 +1,4 @@
+
 import requests
 import base64
 import json
@@ -51,6 +52,8 @@ class AzureDevOpsService:
         try:
             # Log the WIQL query for debugging
             logger.debug(f"WIQL Query: {wiql['query']}")
+            logger.info(f"API Call 1: POST {self.base_url}/wit/wiql?api-version={self.api_version}")
+            logger.info(f"API Call 1 Body: {json.dumps(wiql)}")
             
             # Make API call to execute WIQL query
             response = requests.post(
@@ -100,6 +103,8 @@ class AzureDevOpsService:
             logger.error(f"Error fetching Epics: {str(e)}")
             raise
 
+    # ... keep existing code (_log_epic_fields_for_debugging method)
+
     def _log_epic_fields_for_debugging(self, epics: List[Dict[str, Any]], custom_field_filters: List[Dict[str, str]] = None):
         """
         Log detailed field information for each Epic to help with debugging
@@ -135,6 +140,11 @@ class AzureDevOpsService:
             logger.info(f"  Microsoft fields ({len(microsoft_fields)}): {list(microsoft_fields.keys())}")
             logger.info(f"  Custom fields ({len(custom_fields)}): {list(custom_fields.keys())}")
             logger.info(f"  Other fields ({len(other_fields)}): {list(other_fields.keys())}")
+            
+            # Log ALL field details for debugging
+            logger.info(f"\n  ALL FIELDS DETAILS:")
+            for field_name, field_value in original_fields.items():
+                logger.info(f"    Field: '{field_name}' = '{field_value}' (type: {type(field_value)})")
             
             # Log custom field details
             if custom_fields:
@@ -195,6 +205,8 @@ class AzureDevOpsService:
         logger.info("END DEBUGGING: DETAILED EPIC FIELDS ANALYSIS")
         logger.info("=" * 80)
     
+    # ... keep existing code (_filter_work_items_by_custom_fields method)
+
     def _filter_work_items_by_custom_fields(self, work_items: List[Dict[str, Any]], 
                                           custom_field_filters: List[Dict[str, str]]) -> List[Dict[str, Any]]:
         """
@@ -294,14 +306,27 @@ class AzureDevOpsService:
             ids_string = ",".join(map(str, batch_ids))
             
             try:
-                # Request work item details with all fields
-                response = requests.get(
-                    f"{self.base_url}/wit/workitems?ids={ids_string}&$expand=all&api-version={self.api_version}",
-                    headers=self.headers
-                )
+                # Request work item details with all fields including custom fields
+                # Using both $expand=all and fields=* to ensure we get everything
+                url = f"{self.base_url}/wit/workitems?ids={ids_string}&$expand=all&fields=*&api-version={self.api_version}"
+                logger.info(f"API Call 2: GET {url}")
+                
+                response = requests.get(url, headers=self.headers)
+                
+                logger.info(f"API Call 2 Response Status: {response.status_code}")
+                if response.status_code != 200:
+                    logger.error(f"API Call 2 Response Body: {response.text}")
+                
                 response.raise_for_status()
                 
                 batch_data = response.json()
+                logger.info(f"API Call 2 Response: Found {len(batch_data.get('value', []))} work items")
+                
+                # Log the first work item's fields for debugging
+                if batch_data.get('value') and len(batch_data['value']) > 0:
+                    first_item = batch_data['value'][0]
+                    logger.info(f"Sample work item fields: {list(first_item.get('fields', {}).keys())}")
+                
                 all_items.extend(batch_data.get("value", []))
                 
             except requests.exceptions.RequestException as e:
@@ -316,6 +341,8 @@ class AzureDevOpsService:
         
         return transformed_items
     
+    # ... keep existing code (_transform_work_item method and remaining methods)
+
     def _transform_work_item(self, work_item: Dict[str, Any]) -> Dict[str, Any]:
         """
         Transform a work item response into a more usable format
@@ -375,6 +402,9 @@ class AzureDevOpsService:
                 MODE (Recursive)
                 """
             }
+            
+            logger.info(f"API Call 3: POST {self.base_url}/wit/wiql?api-version={self.api_version}")
+            logger.info(f"API Call 3 Body: {json.dumps(wiql)}")
             
             # Execute WIQL query
             response = requests.post(
