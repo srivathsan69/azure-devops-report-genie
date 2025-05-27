@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 EPIC_COLUMNS = [
     {'field': 'id', 'header': 'ID', 'width': 10},
     {'field': 'title', 'header': 'Title', 'width': 40},
+        {'field': 'title', 'header': 'Description', 'width': 40},
     {'field': 'state', 'header': 'State', 'width': 15},
     {'field': 'estimated_hours', 'header': 'Estimated Hours', 'width': 15},
     {'field': 'completed_work', 'header': 'Completed Work', 'width': 15},
