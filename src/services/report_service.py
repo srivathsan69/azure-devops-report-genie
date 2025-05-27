@@ -24,7 +24,6 @@ logger = logging.getLogger(__name__)
 EPIC_COLUMNS = [
     {'field': 'id', 'header': 'ID', 'width': 10},
     {'field': 'title', 'header': 'Title', 'width': 40},
-        {'field': 'title', 'header': 'Description', 'width': 40},
     {'field': 'state', 'header': 'State', 'width': 15},
     {'field': 'estimated_hours', 'header': 'Estimated Hours', 'width': 15},
     {'field': 'completed_work', 'header': 'Completed Work', 'width': 15},
@@ -37,8 +36,9 @@ FEATURE_COLUMNS = [
     {'field': 'id', 'header': 'ID', 'width': 10},
     {'field': 'title', 'header': 'Title', 'width': 40},
     {'field': 'state', 'header': 'State', 'width': 15},
-    {'field': 'epic_id', 'header': 'Epic ID', 'width': 15},
-    {'field': 'epic_title', 'header': 'Epic Title', 'width': 40},
+    {'field': 'parent_type', 'header': 'Parent Type', 'width': 15},
+    {'field': 'parent_id', 'header': 'Parent ID', 'width': 15},
+    {'field': 'parent_title', 'header': 'Parent Title', 'width': 40},
     {'field': 'estimated_hours', 'header': 'Estimated Hours', 'width': 15},
     {'field': 'completed_work', 'header': 'Completed Work', 'width': 15},
     {'field': 'remaining_work', 'header': 'Remaining Work', 'width': 15},
@@ -50,8 +50,9 @@ STORY_COLUMNS = [
     {'field': 'id', 'header': 'ID', 'width': 10},
     {'field': 'title', 'header': 'Title', 'width': 40},
     {'field': 'state', 'header': 'State', 'width': 15},
-    {'field': 'feature_id', 'header': 'Feature ID', 'width': 15},
-    {'field': 'feature_title', 'header': 'Feature Title', 'width': 40},
+    {'field': 'parent_type', 'header': 'Parent Type', 'width': 15},
+    {'field': 'parent_id', 'header': 'Parent ID', 'width': 15},
+    {'field': 'parent_title', 'header': 'Parent Title', 'width': 40},
     {'field': 'estimated_hours', 'header': 'Estimated Hours', 'width': 15},
     {'field': 'completed_work', 'header': 'Completed Work', 'width': 15},
     {'field': 'remaining_work', 'header': 'Remaining Work', 'width': 15},
@@ -64,8 +65,9 @@ TASK_COLUMNS = [
     {'field': 'title', 'header': 'Title', 'width': 40},
     {'field': 'work_item_type', 'header': 'Type', 'width': 15},
     {'field': 'state', 'header': 'State', 'width': 15},
-    {'field': 'story_id', 'header': 'Story ID', 'width': 15},
-    {'field': 'story_title', 'header': 'Story Title', 'width': 40},
+    {'field': 'parent_type', 'header': 'Parent Type', 'width': 15},
+    {'field': 'parent_id', 'header': 'Parent ID', 'width': 15},
+    {'field': 'parent_title', 'header': 'Parent Title', 'width': 40},
     {'field': 'estimated_hours', 'header': 'Estimated Hours', 'width': 15},
     {'field': 'completed_work', 'header': 'Completed Work', 'width': 15},
     {'field': 'remaining_work', 'header': 'Remaining Work', 'width': 15},
@@ -83,7 +85,8 @@ class ReportService:
         pass
     
     def build_excel_workbook(self, data: Dict[str, Any], output_path: str, sheet_count: int = 4, 
-                              custom_fields: List[Dict[str, str]] = None) -> None:
+                              custom_fields: List[Dict[str, str]] = None, is_user_report: bool = False,
+                              capex_percentage: float = 0.0) -> None:
         """
         Build Excel workbook with work item data
         
@@ -92,6 +95,8 @@ class ReportService:
             output_path: Path where the Excel file will be saved
             sheet_count: Number of sheets to include (1-4)
             custom_fields: List of custom fields to include in the report
+            is_user_report: Whether this is a user-specific report
+            capex_percentage: CAPEX percentage for user reports
         """
         try:
             # Create a workbook and add worksheets
@@ -127,16 +132,16 @@ class ReportService:
             
             # Build sheets based on the requested count
             if sheet_count >= 1:
-                self._build_epic_sheet(workbook, data["epics"], header_format, cell_format, percent_format, custom_field_names)
+                self._build_epic_sheet(workbook, data["epics"], header_format, cell_format, percent_format, custom_field_names, is_user_report, capex_percentage)
             
             if sheet_count >= 2:
-                self._build_feature_sheet(workbook, data["features"], header_format, cell_format, percent_format)
+                self._build_feature_sheet(workbook, data["features"], header_format, cell_format, percent_format, is_user_report, capex_percentage)
             
             if sheet_count >= 3:
-                self._build_story_sheet(workbook, data["stories"], header_format, cell_format, percent_format)
+                self._build_story_sheet(workbook, data["stories"], header_format, cell_format, percent_format, is_user_report, capex_percentage)
             
             if sheet_count >= 4:
-                self._build_task_sheet(workbook, data["leaf_items"], header_format, cell_format, percent_format)
+                self._build_task_sheet(workbook, data["leaf_items"], header_format, cell_format, percent_format, is_user_report, capex_percentage)
             
             # Close the workbook to save it
             workbook.close()
@@ -178,19 +183,10 @@ class ReportService:
     
     def _build_sheet_with_config(self, workbook, worksheet_name: str, items: List[Dict[str, Any]], 
                                  columns_config: List[Dict], header_format, cell_format, percent_format,
-                                 custom_field_names: List[str] = None) -> None:
+                                 custom_field_names: List[str] = None, is_user_report: bool = False,
+                                 capex_percentage: float = 0.0) -> None:
         """
         Generic method to build a worksheet using column configuration
-        
-        Args:
-            workbook: The Excel workbook
-            worksheet_name: Name of the worksheet
-            items: List of work items
-            columns_config: Column configuration list
-            header_format: Format for header cells
-            cell_format: Format for data cells
-            percent_format: Format for percentage cells
-            custom_field_names: List of custom field names to include
         """
         logger.info(f"Building {worksheet_name} sheet with {len(items)} items")
         worksheet = workbook.add_worksheet(worksheet_name)
@@ -220,12 +216,11 @@ class ReportService:
                 
                 # Use percentage format for percent_complete field
                 if field_name == 'percent_complete':
-                    # Convert to decimal for proper percentage display
+                    # Value should already be between 0 and 1
                     if isinstance(value, (int, float)):
-                        # Value should already be between 0 and 1, but handle both cases
-                        if value > 1:
-                            value = value / 100
-                    worksheet.write(row, col_idx, value, percent_format)
+                        worksheet.write(row, col_idx, value, percent_format)
+                    else:
+                        worksheet.write(row, col_idx, 0, percent_format)
                 else:
                     worksheet.write(row, col_idx, value, cell_format)
             
@@ -242,9 +237,37 @@ class ReportService:
                                                            item["original_fields"].get(field_name, ""))
                     
                     worksheet.write(row, col_idx, value, cell_format)
+        
+        # Add summary row for user reports
+        if is_user_report and items:
+            self._add_summary_row(worksheet, items, len(headers), cell_format, percent_format, capex_percentage)
+    
+    def _add_summary_row(self, worksheet, items: List[Dict[str, Any]], num_cols: int, 
+                        cell_format, percent_format, capex_percentage: float) -> None:
+        """Add a summary row with totals and CAPEX percentage"""
+        if not items:
+            return
+            
+        summary_row = len(items) + 2  # Skip one row after data
+        
+        # Calculate totals
+        total_estimated = sum(item.get('estimated_hours', 0) for item in items)
+        total_completed = sum(item.get('completed_work', 0) for item in items)
+        total_remaining = sum(item.get('remaining_work', 0) for item in items)
+        total_percent = total_completed / total_estimated if total_estimated > 0 else 0
+        
+        # Write summary labels and values
+        worksheet.write(summary_row, 0, "TOTAL", cell_format)
+        worksheet.write(summary_row, 1, f"Estimated: {total_estimated}h, Completed: {total_completed}h, Remaining: {total_remaining}h", cell_format)
+        worksheet.write(summary_row, 2, total_percent, percent_format)
+        
+        # Write CAPEX percentage if applicable
+        if capex_percentage > 0:
+            worksheet.write(summary_row + 1, 0, "CAPEX %", cell_format)
+            worksheet.write(summary_row + 1, 1, f"{capex_percentage:.2%} of total work corresponds to CAPEX fields", cell_format)
     
     def _build_epic_sheet(self, workbook, epics: List[Dict[str, Any]], header_format, cell_format, percent_format,
-                          custom_field_names: List[str]) -> None:
+                          custom_field_names: List[str], is_user_report: bool = False, capex_percentage: float = 0.0) -> None:
         """Build the Epic worksheet using configuration"""
         logger.info(f"Building Epic sheet with {len(epics)} total epics before filtering")
         
@@ -253,9 +276,10 @@ class ReportService:
         logger.info(f"Epic sheet will contain {len(epic_items)} Epic work items")
         
         self._build_sheet_with_config(workbook, "Epics", epic_items, EPIC_COLUMNS, 
-                                      header_format, cell_format, percent_format, custom_field_names)
+                                      header_format, cell_format, percent_format, custom_field_names, is_user_report, capex_percentage)
 
-    def _build_feature_sheet(self, workbook, features: List[Dict[str, Any]], header_format, cell_format, percent_format) -> None:
+    def _build_feature_sheet(self, workbook, features: List[Dict[str, Any]], header_format, cell_format, percent_format,
+                            is_user_report: bool = False, capex_percentage: float = 0.0) -> None:
         """Build the Feature worksheet using configuration"""
         logger.info(f"Building Feature sheet with {len(features)} total features before filtering")
         
@@ -264,9 +288,10 @@ class ReportService:
         logger.info(f"Feature sheet will contain {len(feature_items)} Feature work items")
         
         self._build_sheet_with_config(workbook, "Features", feature_items, FEATURE_COLUMNS, 
-                                      header_format, cell_format, percent_format)
+                                      header_format, cell_format, percent_format, None, is_user_report, capex_percentage)
     
-    def _build_story_sheet(self, workbook, stories: List[Dict[str, Any]], header_format, cell_format, percent_format) -> None:
+    def _build_story_sheet(self, workbook, stories: List[Dict[str, Any]], header_format, cell_format, percent_format,
+                          is_user_report: bool = False, capex_percentage: float = 0.0) -> None:
         """Build the User Story worksheet using configuration"""
         logger.info(f"Building Story sheet with {len(stories)} total stories before filtering")
         
@@ -275,9 +300,10 @@ class ReportService:
         logger.info(f"Story sheet will contain {len(story_items)} User Story work items")
         
         self._build_sheet_with_config(workbook, "User Stories", story_items, STORY_COLUMNS, 
-                                      header_format, cell_format, percent_format)
+                                      header_format, cell_format, percent_format, None, is_user_report, capex_percentage)
     
-    def _build_task_sheet(self, workbook, tasks: List[Dict[str, Any]], header_format, cell_format, percent_format) -> None:
+    def _build_task_sheet(self, workbook, tasks: List[Dict[str, Any]], header_format, cell_format, percent_format,
+                         is_user_report: bool = False, capex_percentage: float = 0.0) -> None:
         """Build the Task worksheet using configuration"""
         logger.info(f"Building Task sheet with {len(tasks)} total tasks before filtering")
         
@@ -286,4 +312,4 @@ class ReportService:
         logger.info(f"Task sheet will contain {len(task_items)} Task/Bug/QA work items")
         
         self._build_sheet_with_config(workbook, "Tasks", task_items, TASK_COLUMNS, 
-                                      header_format, cell_format, percent_format)
+                                      header_format, cell_format, percent_format, None, is_user_report, capex_percentage)

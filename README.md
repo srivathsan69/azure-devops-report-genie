@@ -6,11 +6,12 @@ A containerized Python API service that connects to Azure DevOps, rolls up hiera
 ## Features
 
 - Connects to Azure DevOps REST API
-- Extracts work item hierarchy (Epics → Features → Stories → Tasks)
+- Extracts work item hierarchy with flexible parent-child relationships
 - Filters Epics based on custom field values
-- Filters work items by creation date
+- Filters work items by creation date and assignment
 - Rolls up metrics (estimated hours, completed work)
 - Generates Excel report with configurable detail levels
+- User-specific reports with CAPEX percentage calculation
 - Uploads report to Azure Blob Storage
 - Containerized for easy deployment
 - Swagger API documentation
@@ -65,7 +66,7 @@ docker run -p 5000:5000 azure-devops-reporter
 
 ### API Documentation
 
-- Swagger UI: `/ado-report/docs/`
+- Swagger UI: `/ado-report/docs`
 - API Spec: `/ado-report/apispec.json`
 
 ### Health Check
@@ -116,33 +117,72 @@ docker run -p 5000:5000 azure-devops-reporter
 }
 ```
 
+### Generate User Report
+
+**Endpoint**: `/ado-report/user-report`
+
+**Method**: POST
+
+**Request Body**:
+
+```json
+{
+  "AZURE_PAT": "your-azure-devops-personal-access-token",
+  "ORGANIZATION": "your-azure-devops-organization",
+  "PROJECT": "your-azure-devops-project",
+  "ASSIGNEDTO": "John Doe",
+  "CUSTOM_FIELDS": [
+    {
+      "key": "Custom.Team",
+      "value": "Development"
+    }
+  ],
+  "CAPEX_FIELDS": [
+    {
+      "key": "Custom.Business_Value",
+      "value": "High"
+    },
+    {
+      "key": "Custom.Targeted_environment",
+      "value": "Production"
+    }
+  ],
+  "filter_date": "2025-01-01",
+  "output_file_name": "user_report_john_doe",
+  "SHEET_COUNT": 4,
+  "storage_account_name": "your-storage-account-name",
+  "container_name": "your-container-name",
+  "storage_account_sas": "your-storage-account-sas-token"
+}
+```
+
 **Response**:
 
 ```json
 {
-  "message": "Report generated successfully",
-  "file_url": "https://storage-account.blob.core.windows.net/container/my_custom_report_name.xlsx"
+  "message": "User report generated successfully for John Doe",
+  "file_url": "https://storage-account.blob.core.windows.net/container/user_report_john_doe.xlsx",
+  "capex_percentage": 0.65
 }
 ```
 
 ## Configuration Options
 
+### Common Parameters
 - **AZURE_PAT**: Azure DevOps Personal Access Token
 - **ORGANIZATION**: Azure DevOps Organization name
 - **PROJECT**: Azure DevOps Project name
-- **CUSTOM_FIELDS**: List of objects with key-value pairs for custom field filtering:
-  - **key**: Custom field name (with or without 'Custom.' prefix)
-  - **value**: Custom field value to filter on
+- **CUSTOM_FIELDS**: List of objects with key-value pairs for custom field filtering
 - **filter_date**: Optional date string (YYYY-MM-DD) to filter work items created on or after this date
 - **output_file_name**: Optional custom filename for the output report (without extension)
 - **SHEET_COUNT**: Integer (1-4) indicating how many Excel sheets to generate (default = 4)
-  - 1: Epic Summary
-  - 2: + Feature Breakdown
-  - 3: + Story Breakdown
-  - 4: + Leaf Tasks (full detail)
 - **storage_account_name**: Azure Storage account name
 - **container_name**: Azure Storage container name
 - **storage_account_sas**: SAS token for Azure Storage authentication
+
+### User Report Specific Parameters
+- **ASSIGNEDTO**: Name of the user to filter work items by assignment
+- **CAPEX_FIELDS**: List of custom field objects for CAPEX percentage calculation
 
 ## Excel Report Column Configuration
 
@@ -171,9 +211,28 @@ EPIC_COLUMNS = [
     {'field': 'id', 'header': 'ID', 'width': 10},
     {'field': 'title', 'header': 'Title', 'width': 40},
     {'field': 'state', 'header': 'State', 'width': 15},
+    {'field': 'parent_type', 'header': 'Parent Type', 'width': 15},
+    {'field': 'parent_id', 'header': 'Parent ID', 'width': 15},
     # Add more columns here...
 ]
 ```
+
+### Available Fields
+
+The following fields are available for all work item types:
+- `id`: Work item ID
+- `title`: Work item title
+- `type`: Work item type (Epic, Feature, User Story, Task, Bug, etc.)
+- `state`: Work item state
+- `assigned_to`: Person assigned to the work item
+- `estimated_hours`: Original estimate in hours
+- `completed_work`: Completed work in hours
+- `remaining_work`: Remaining work in hours
+- `percent_complete`: Completion percentage (0.0 to 1.0)
+- `parent_type`: Type of parent work item
+- `parent_id`: ID of parent work item
+- `parent_title`: Title of parent work item
+- `created_date`: When the work item was created
 
 ### Adding New Columns
 
@@ -192,88 +251,83 @@ To remove a column:
 To change column order:
 1. Reorder the dictionaries in the column configuration list
 
+## Work Item Hierarchy Logic
+
+### Flexible Hierarchy Support
+
+The system now supports flexible work item hierarchies that don't strictly follow the Epic → Feature → User Story → Task pattern. Work items that have non-standard parent-child relationships (e.g., Tasks directly under Features) are still included in the report.
+
+### Hierarchy Traversal
+
+1. **Starting Point**: Filtered Epic work items
+2. **Descendant Discovery**: All work items that are direct or indirect children of the filtered Epics
+3. **Type Classification**: Work items are categorized by type into appropriate sheets
+4. **Parent Information**: Each work item includes parent type, ID, and title for traceability
+
+### Example Hierarchy
+
+```
+Epic 1000: "E-commerce Platform"
+├── Feature 1001: "User Authentication"
+│   ├── User Story 1002: "User Login"
+│   │   ├── Task 1003: "Create Login UI"
+│   │   └── Task 1004: "Backend API"
+│   └── Task 1005: "Setup Authentication" (Direct task under feature)
+└── Feature 1007: "Product Catalog"
+    ├── User Story 1008: "Product Listing"
+    │   └── Task 1009: "Display Products"
+    └── Bug 1010: "Fix Product Images" (Direct bug under feature)
+```
+
+All work items in this hierarchy would be included in the report, regardless of hierarchy violations.
+
 ## Work Item Hours Calculation Logic
 
 ### Overview
 
 The system calculates three key metrics for work items:
 
-1. **Estimated Hours**: The total estimated effort for the work item and all its children
-2. **Completed Work**: The total hours actually worked on the work item and all its children
-3. **Remaining Work**: The estimated hours still remaining to complete the work item and all its children
+1. **Estimated Hours**: From the `Microsoft.VSTS.Scheduling.OriginalEstimate` field
+2. **Completed Work**: From the `Microsoft.VSTS.Scheduling.CompletedWork` field
+3. **Remaining Work**: From the `Microsoft.VSTS.Scheduling.RemainingWork` field
+4. **Percent Complete**: Calculated as (Completed Work / Estimated Hours) × 100
 
 ### Calculation Logic with Example
 
-Let's use a simple hierarchy to explain the calculations:
-
-```
-Epic 1000: "E-commerce Platform"
-├── Feature 1001: "User Authentication"
-│   ├── Story 1002: "User Login"
-│   │   ├── Task 1003: "Create Login UI" (Est: 8h, Completed: 6h, Remaining: 2h)
-│   │   └── Task 1004: "Backend API" (Est: 12h, Completed: 12h, Remaining: 0h)
-│   └── Story 1005: "User Registration"
-│       └── Task 1006: "Registration Form" (Est: 6h, Completed: 3h, Remaining: 3h)
-└── Feature 1007: "Product Catalog"
-    └── Story 1008: "Product Listing"
-        └── Task 1009: "Display Products" (Est: 10h, Completed: 4h, Remaining: 6h)
-```
+Using the hierarchy example above:
 
 **Individual Work Item Values (from Azure DevOps fields):**
 - Task 1003: Estimated=8h, Completed=6h, Remaining=2h
 - Task 1004: Estimated=12h, Completed=12h, Remaining=0h
-- Task 1006: Estimated=6h, Completed=3h, Remaining=3h
+- Task 1005: Estimated=4h, Completed=4h, Remaining=0h
 - Task 1009: Estimated=10h, Completed=4h, Remaining=6h
+- Bug 1010: Estimated=2h, Completed=1h, Remaining=1h
 
-**Rolled-up Calculations:**
+**Work Item Calculations:**
 
-1. **Story 1002** (User Login):
+1. **Task 1003**: 
+   - % Complete: (6h / 8h) × 100 = 75%
+
+2. **User Story 1002** (if it had child aggregation):
    - Estimated Hours: 8h + 12h = 20h
    - Completed Work: 6h + 12h = 18h
-   - Remaining Work: 2h + 0h = 2h
    - % Complete: (18h / 20h) × 100 = 90%
 
-2. **Story 1005** (User Registration):
-   - Estimated Hours: 6h
-   - Completed Work: 3h
-   - Remaining Work: 3h
-   - % Complete: (3h / 6h) × 100 = 50%
-
-3. **Feature 1001** (User Authentication):
-   - Estimated Hours: 20h + 6h = 26h
-   - Completed Work: 18h + 3h = 21h
-   - Remaining Work: 2h + 3h = 5h
-   - % Complete: (21h / 26h) × 100 = 80.77%
-
-4. **Story 1008** (Product Listing):
-   - Estimated Hours: 10h
-   - Completed Work: 4h
-   - Remaining Work: 6h
-   - % Complete: (4h / 10h) × 100 = 40%
-
-5. **Feature 1007** (Product Catalog):
-   - Estimated Hours: 10h
-   - Completed Work: 4h
-   - Remaining Work: 6h
-   - % Complete: (4h / 10h) × 100 = 40%
-
-6. **Epic 1000** (E-commerce Platform):
-   - Estimated Hours: 26h + 10h = 36h
-   - Completed Work: 21h + 4h = 25h
-   - Remaining Work: 5h + 6h = 11h
-   - % Complete: (25h / 36h) × 100 = 69.44%
+3. **Feature 1001** (aggregating all descendants):
+   - Estimated Hours: 20h + 4h = 24h
+   - Completed Work: 18h + 4h = 22h
+   - % Complete: (22h / 24h) × 100 = 91.67%
 
 ### Key Points
 
-- **Bottom-up aggregation**: Values are calculated from the leaf tasks up to parent items
-- **Hierarchical rollup**: Each parent item's values are the sum of all its children
-- **Percentage calculation**: % Complete = (Completed Work / Estimated Hours) × 100
-- **Zero handling**: If Estimated Hours is 0, % Complete is set to 0
-- **Data sources**: Individual task values come from Azure DevOps work item fields
+- **Individual Values**: Each work item shows its own estimated, completed, and remaining hours
+- **No Automatic Rollup**: Parent items show their own values, not aggregated child values
+- **Percentage Calculation**: % Complete = (Completed Work / Estimated Hours) × 100
+- **Decimal Format**: Percentages are stored as decimals (0.0 to 1.0) and displayed as percentages in Excel
 
 ## Work Item Type Filtering
 
-The report now properly filters work items by type for each sheet:
+The report properly filters work items by type for each sheet:
 
 - **Epic Sheet**: Contains only Epic work items
 - **Feature Sheet**: Contains only Feature work items  
@@ -281,6 +335,34 @@ The report now properly filters work items by type for each sheet:
 - **Tasks Sheet**: Contains Task, Bug, and QA Validation Task work items
 
 This ensures each sheet shows only the appropriate work item types without mixing different types together.
+
+## User Reports and CAPEX Calculation
+
+### User Report Features
+
+User reports provide the following capabilities:
+
+1. **Assignment Filtering**: Show only work items assigned to a specific user
+2. **Type Organization**: Organize user's work items by type into separate sheets
+3. **Summary Rows**: Include total hours and percentages at the bottom of each sheet
+4. **CAPEX Percentage**: Calculate what percentage of user's work corresponds to CAPEX projects
+
+### CAPEX Calculation Logic
+
+The CAPEX percentage shows what portion of a user's work corresponds to Epic work items that match the CAPEX_FIELDS criteria:
+
+1. **Find CAPEX Epics**: Epics that match all CAPEX_FIELDS criteria
+2. **Get Descendants**: All work items under those CAPEX Epics
+3. **Calculate User's CAPEX Work**: User's work items that are descendants of CAPEX Epics
+4. **Calculate Percentage**: (CAPEX Hours / Total User Hours) × 100
+
+### Example CAPEX Calculation
+
+**User's Total Work**: 80 hours estimated
+**CAPEX Epic Work**: 40 hours estimated (descendant work items of CAPEX Epics)
+**CAPEX Percentage**: 40h / 80h = 50%
+
+This means 50% of the user's work corresponds to CAPEX projects.
 
 ## Logging
 
@@ -312,6 +394,7 @@ The service is designed to be easily customized:
 - Column definitions are centralized in the `report_service.py` file under the "COLUMN CONFIGURATION SECTION"
 - Custom field handling is extensible in `azure_devops_service.py`
 - Sheet structure can be modified by updating the column configuration arrays
+- Hierarchy traversal logic accommodates non-standard parent-child relationships
 
 ## License
 
