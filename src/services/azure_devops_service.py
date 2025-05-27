@@ -403,6 +403,71 @@ class AzureDevOpsService:
             logger.error(f"Error fetching child work items for parent {parent_id}: {str(e)}")
             return []
 
+    def _aggregate_hours_from_descendants(self, work_items: List[Dict[str, Any]], 
+                                         all_work_items: List[Dict[str, Any]]) -> None:
+        """
+        Aggregate hours from descendant work items for parent work items
+        """
+        logger.info("Starting hour aggregation for parent work items...")
+        
+        # Create lookup dict for fast access
+        work_item_lookup = {item["id"]: item for item in all_work_items}
+        
+        # Build parent-child relationships
+        children_map = {}
+        for item in all_work_items:
+            parent_id = item.get("parent_id")
+            if parent_id:
+                if parent_id not in children_map:
+                    children_map[parent_id] = []
+                children_map[parent_id].append(item["id"])
+        
+        def get_all_descendants(parent_id: int) -> List[int]:
+            """Recursively get all descendant IDs"""
+            descendants = []
+            direct_children = children_map.get(parent_id, [])
+            
+            for child_id in direct_children:
+                descendants.append(child_id)
+                descendants.extend(get_all_descendants(child_id))
+            
+            return descendants
+        
+        # Process each work item for aggregation
+        for item in work_items:
+            item_type = item.get("type", "").lower()
+            
+            # Only aggregate for parent work items (Epic, Feature, User Story)
+            if item_type in ["epic", "feature", "user story"]:
+                descendant_ids = get_all_descendants(item["id"])
+                
+                if descendant_ids:
+                    total_estimated = 0
+                    total_completed = 0
+                    total_remaining = 0
+                    
+                    # Aggregate from all descendants
+                    for desc_id in descendant_ids:
+                        if desc_id in work_item_lookup:
+                            desc_item = work_item_lookup[desc_id]
+                            total_estimated += desc_item.get("estimated_hours", 0)
+                            total_completed += desc_item.get("completed_work", 0)
+                            total_remaining += desc_item.get("remaining_work", 0)
+                    
+                    # Update the parent item with aggregated values
+                    item["estimated_hours"] = total_estimated
+                    item["completed_work"] = total_completed
+                    item["remaining_work"] = total_remaining
+                    
+                    # Recalculate percentage
+                    if total_estimated > 0:
+                        item["percent_complete"] = total_completed / total_estimated
+                    else:
+                        item["percent_complete"] = 0
+                    
+                    logger.debug(f"Aggregated hours for {item_type} {item['id']}: "
+                               f"Est={total_estimated}, Comp={total_completed}, Rem={total_remaining}")
+
     def calculate_capex_percentage(self, user_work_items: List[Dict[str, Any]], 
                                  capex_epics: List[Dict[str, Any]]) -> float:
         """
@@ -447,6 +512,12 @@ class AzureDevOpsService:
         # Add the original epics to the results
         all_epics = epics + descendants["epics"]
         
+        # Combine all work items for aggregation
+        all_work_items = all_epics + descendants["features"] + descendants["stories"] + descendants["leaf_items"]
+        
+        # Perform hour aggregation
+        self._aggregate_hours_from_descendants(all_work_items, all_work_items)
+        
         logger.info(f"Hierarchy traversal complete:")
         logger.info(f"  - {len(all_epics)} epics")
         logger.info(f"  - {len(descendants['features'])} features")
@@ -462,7 +533,7 @@ class AzureDevOpsService:
 
     def organize_user_work_items(self, user_work_items: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
-        Organize user work items by type
+        Organize user work items by type and perform hour aggregation
         """
         epics = []
         features = []
@@ -483,6 +554,10 @@ class AzureDevOpsService:
             else:
                 # Handle unknown types - add to leaf items
                 leaf_items.append(item)
+        
+        # Perform hour aggregation for user work items
+        all_user_items = epics + features + stories + leaf_items
+        self._aggregate_hours_from_descendants(all_user_items, all_user_items)
         
         return {
             "epics": epics,
