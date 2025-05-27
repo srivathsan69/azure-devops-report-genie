@@ -1,5 +1,3 @@
-
-
 import requests
 import base64
 import json
@@ -104,8 +102,6 @@ class AzureDevOpsService:
             logger.error(f"Error fetching Epics: {str(e)}")
             raise
 
-    # ... keep existing code (_log_epic_fields_for_debugging method)
-
     def _log_epic_fields_for_debugging(self, epics: List[Dict[str, Any]], custom_field_filters: List[Dict[str, str]] = None):
         """
         Log detailed field information for each Epic to help with debugging
@@ -206,8 +202,6 @@ class AzureDevOpsService:
         logger.info("END DEBUGGING: DETAILED EPIC FIELDS ANALYSIS")
         logger.info("=" * 80)
     
-    # ... keep existing code (_filter_work_items_by_custom_fields method)
-
     def _filter_work_items_by_custom_fields(self, work_items: List[Dict[str, Any]], 
                                           custom_field_filters: List[Dict[str, str]]) -> List[Dict[str, Any]]:
         """
@@ -342,8 +336,6 @@ class AzureDevOpsService:
         
         return transformed_items
     
-    # ... keep existing code (_transform_work_item method and remaining methods)
-
     def _transform_work_item(self, work_item: Dict[str, Any]) -> Dict[str, Any]:
         """
         Transform a work item response into a more usable format
@@ -355,12 +347,17 @@ class AzureDevOpsService:
             Transformed work item with simplified field access
         """
         fields = work_item.get("fields", {})
+        work_item_type = fields.get("System.WorkItemType", "")
+        
+        # Log the work item being transformed
+        logger.debug(f"Transforming work item {work_item.get('id')}: type='{work_item_type}'")
         
         # Basic fields that are present in all work items
         result = {
             "id": work_item.get("id"),
             "url": work_item.get("url"),
-            "type": fields.get("System.WorkItemType", ""),
+            "type": work_item_type,  # This is the key field for filtering
+            "work_item_type": work_item_type,  # Add this as an alias for compatibility
             "title": fields.get("System.Title", ""),
             "state": fields.get("System.State", ""),
             "created_date": fields.get("System.CreatedDate", ""),
@@ -380,6 +377,7 @@ class AzureDevOpsService:
                 simple_name = field_name.split('.')[-1]
                 result[simple_name] = field_value
         
+        logger.debug(f"Transformed work item {result['id']}: type='{result['type']}'")
         return result
     
     def _get_child_work_items(self, parent_id: int) -> List[Dict[str, Any]]:
@@ -460,20 +458,17 @@ class AzureDevOpsService:
                 completed_work = sum(child.get("completed_work", 0) for child in children)
                 remaining_work = sum(child.get("remaining_work", 0) for child in children)
                 
-                # Only update if the item doesn't have its own values
-                if not item.get("estimated_hours"):
-                    item["estimated_hours"] = estimated_hours
-                    
-                if not item.get("completed_work"):
-                    item["completed_work"] = completed_work
-                    
-                if not item.get("remaining_work"):
-                    item["remaining_work"] = remaining_work
+                # Update the parent's metrics with rolled-up values
+                item["estimated_hours"] = estimated_hours
+                item["completed_work"] = completed_work
+                item["remaining_work"] = remaining_work
             
-            # Calculate percent complete
+            # Calculate percent complete (as decimal between 0 and 1)
             est = item.get("estimated_hours", 0)
             comp = item.get("completed_work", 0)
             item["percent_complete"] = comp / est if est > 0 else 0
+            
+            logger.debug(f"Work item {item.get('id')}: est={est}, comp={comp}, remaining={item.get('remaining_work', 0)}, pct={item['percent_complete']}")
 
     def traverse_hierarchy(self, epics: List[Dict[str, Any]], custom_field_filters: List[Dict[str, str]] = None) -> Dict[str, Any]:
         """
@@ -486,6 +481,8 @@ class AzureDevOpsService:
         Returns:
             Hierarchical data structure with all work items
         """
+        logger.info(f"Starting hierarchy traversal with {len(epics)} epics")
+        
         # Lists to store different types of work items
         features = []
         stories = []
@@ -494,10 +491,12 @@ class AzureDevOpsService:
         # Process each epic and its children
         for epic in epics:
             epic_id = epic["id"]
+            logger.info(f"Processing Epic {epic_id}: {epic['title']}")
             
             # Get feature children of this epic
             epic_features = self._get_child_work_items(epic_id)
             epic["children"] = epic_features
+            logger.info(f"Epic {epic_id} has {len(epic_features)} direct children")
             
             # Process each feature and its children
             for feature in epic_features:
@@ -506,10 +505,12 @@ class AzureDevOpsService:
                 features.append(feature)
                 
                 feature_id = feature["id"]
+                logger.debug(f"Processing Feature {feature_id}: {feature['title']} (type: {feature.get('type')})")
                 
                 # Get user story children of this feature
                 feature_stories = self._get_child_work_items(feature_id)
                 feature["children"] = feature_stories
+                logger.debug(f"Feature {feature_id} has {len(feature_stories)} direct children")
                 
                 # Process each user story and its children
                 for story in feature_stories:
@@ -518,16 +519,25 @@ class AzureDevOpsService:
                     stories.append(story)
                     
                     story_id = story["id"]
+                    logger.debug(f"Processing Story {story_id}: {story['title']} (type: {story.get('type')})")
                     
                     # Get task children of this story
                     story_tasks = self._get_child_work_items(story_id)
                     story["children"] = story_tasks
+                    logger.debug(f"Story {story_id} has {len(story_tasks)} direct children")
                     
                     # Process each task
                     for task in story_tasks:
                         task["story_id"] = story_id
                         task["story_title"] = story["title"]
                         leaf_items.append(task)
+                        logger.debug(f"Added Task {task['id']}: {task['title']} (type: {task.get('type')})")
+        
+        logger.info(f"Hierarchy traversal complete:")
+        logger.info(f"  - {len(epics)} epics")
+        logger.info(f"  - {len(features)} features")
+        logger.info(f"  - {len(stories)} stories")
+        logger.info(f"  - {len(leaf_items)} leaf items")
         
         # Collect all custom field names from the filter
         custom_fields = []
@@ -541,6 +551,7 @@ class AzureDevOpsService:
                     custom_fields.append(field_name)
         
         # Roll up metrics from children to parents
+        logger.info("Rolling up metrics from children to parents")
         self._roll_up_metrics(epics)
         
         return {
@@ -550,4 +561,3 @@ class AzureDevOpsService:
             "leaf_items": leaf_items,
             "custom_fields": custom_fields
         }
-

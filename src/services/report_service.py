@@ -147,7 +147,33 @@ class ReportService:
     
     def _filter_work_items_by_type(self, items: List[Dict[str, Any]], allowed_types: List[str]) -> List[Dict[str, Any]]:
         """Filter work items by their work item type"""
-        return [item for item in items if item.get("work_item_type", "").lower() in [t.lower() for t in allowed_types]]
+        logger.info(f"Filtering work items by types: {allowed_types}")
+        logger.info(f"Input items count: {len(items)}")
+        
+        # Debug: Log all work item types found
+        if items:
+            found_types = set()
+            for item in items:
+                work_item_type = item.get("type", "").strip()
+                if work_item_type:
+                    found_types.add(work_item_type)
+            logger.info(f"Work item types found in data: {list(found_types)}")
+        
+        # Filter items - use 'type' field which is mapped from System.WorkItemType
+        filtered_items = []
+        for item in items:
+            work_item_type = item.get("type", "").strip()
+            logger.debug(f"Item {item.get('id')}: type='{work_item_type}'")
+            
+            # Check if the work item type matches any of the allowed types (case-insensitive)
+            if any(work_item_type.lower() == allowed_type.lower() for allowed_type in allowed_types):
+                filtered_items.append(item)
+                logger.debug(f"Item {item.get('id')} included (type matches)")
+            else:
+                logger.debug(f"Item {item.get('id')} excluded (type '{work_item_type}' not in {allowed_types})")
+        
+        logger.info(f"Filtered items count: {len(filtered_items)}")
+        return filtered_items
     
     def _build_sheet_with_config(self, workbook, worksheet_name: str, items: List[Dict[str, Any]], 
                                  columns_config: List[Dict], header_format, cell_format, percent_format,
@@ -165,6 +191,7 @@ class ReportService:
             percent_format: Format for percentage cells
             custom_field_names: List of custom field names to include
         """
+        logger.info(f"Building {worksheet_name} sheet with {len(items)} items")
         worksheet = workbook.add_worksheet(worksheet_name)
         
         # Set column widths and write headers
@@ -192,9 +219,11 @@ class ReportService:
                 
                 # Use percentage format for percent_complete field
                 if field_name == 'percent_complete':
-                    # Convert to decimal if it's a percentage (divide by 100)
-                    if isinstance(value, (int, float)) and value > 1:
-                        value = value / 100
+                    # Convert to decimal for proper percentage display
+                    if isinstance(value, (int, float)):
+                        # Value should already be between 0 and 1, but handle both cases
+                        if value > 1:
+                            value = value / 100
                     worksheet.write(row, col_idx, value, percent_format)
                 else:
                     worksheet.write(row, col_idx, value, cell_format)
@@ -216,28 +245,44 @@ class ReportService:
     def _build_epic_sheet(self, workbook, epics: List[Dict[str, Any]], header_format, cell_format, percent_format,
                           custom_field_names: List[str]) -> None:
         """Build the Epic worksheet using configuration"""
+        logger.info(f"Building Epic sheet with {len(epics)} total epics before filtering")
+        
         # Filter to only Epic work items
         epic_items = self._filter_work_items_by_type(epics, ["Epic"])
+        logger.info(f"Epic sheet will contain {len(epic_items)} Epic work items")
+        
         self._build_sheet_with_config(workbook, "Epics", epic_items, EPIC_COLUMNS, 
                                       header_format, cell_format, percent_format, custom_field_names)
 
     def _build_feature_sheet(self, workbook, features: List[Dict[str, Any]], header_format, cell_format, percent_format) -> None:
         """Build the Feature worksheet using configuration"""
+        logger.info(f"Building Feature sheet with {len(features)} total features before filtering")
+        
         # Filter to only Feature work items
         feature_items = self._filter_work_items_by_type(features, ["Feature"])
+        logger.info(f"Feature sheet will contain {len(feature_items)} Feature work items")
+        
         self._build_sheet_with_config(workbook, "Features", feature_items, FEATURE_COLUMNS, 
                                       header_format, cell_format, percent_format)
     
     def _build_story_sheet(self, workbook, stories: List[Dict[str, Any]], header_format, cell_format, percent_format) -> None:
         """Build the User Story worksheet using configuration"""
+        logger.info(f"Building Story sheet with {len(stories)} total stories before filtering")
+        
         # Filter to only User Story work items
         story_items = self._filter_work_items_by_type(stories, ["User Story"])
+        logger.info(f"Story sheet will contain {len(story_items)} User Story work items")
+        
         self._build_sheet_with_config(workbook, "User Stories", story_items, STORY_COLUMNS, 
                                       header_format, cell_format, percent_format)
     
     def _build_task_sheet(self, workbook, tasks: List[Dict[str, Any]], header_format, cell_format, percent_format) -> None:
         """Build the Task worksheet using configuration"""
+        logger.info(f"Building Task sheet with {len(tasks)} total tasks before filtering")
+        
         # Filter to Task, Bug, and QA Validation Task work items
         task_items = self._filter_work_items_by_type(tasks, ["Task", "Bug", "QA Validation Task"])
+        logger.info(f"Task sheet will contain {len(task_items)} Task/Bug/QA work items")
+        
         self._build_sheet_with_config(workbook, "Tasks", task_items, TASK_COLUMNS, 
                                       header_format, cell_format, percent_format)
