@@ -18,7 +18,22 @@ logger = setup_logging(log_level=logging.INFO)
 # Initialize Flask app
 app = Flask(__name__)
 
-# Configure Swagger
+# Configure Swagger with proper configuration
+swagger_config = {
+    "headers": [],
+    "specs": [
+        {
+            "endpoint": 'apispec',
+            "route": '/ado-report/apispec.json',
+            "rule_filter": lambda rule: True,
+            "model_filter": lambda tag: True,
+        }
+    ],
+    "static_url_path": "/ado-report/flasgger_static",
+    "swagger_ui": True,
+    "specs_route": "/ado-report/docs/"
+}
+
 swagger_template = {
     "info": {
         "title": "Azure DevOps Work Item Report API",
@@ -29,7 +44,8 @@ swagger_template = {
         }
     }
 }
-swagger = Swagger(app, template=swagger_template)
+
+swagger = Swagger(app, config=swagger_config, template=swagger_template)
 
 # Health check endpoints for container readiness/liveness probes
 @app.route('/health', methods=['GET'])
@@ -43,8 +59,6 @@ def health_check():
         description: Service is healthy
     """
     return jsonify({"status": "healthy"}), 200
-
-# ... keep existing code (report generation endpoint and API documentation)
 
 @app.route('/ado-report/generate-report', methods=['POST'])
 def generate_report_api():

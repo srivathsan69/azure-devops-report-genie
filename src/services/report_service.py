@@ -5,6 +5,77 @@ from typing import Dict, List, Any, Optional
 
 logger = logging.getLogger(__name__)
 
+# ================================================================================
+# COLUMN CONFIGURATION SECTION
+# ================================================================================
+# 
+# To modify columns in any sheet, update the configurations below:
+# - Add/remove columns by modifying the column definitions
+# - Change column order by reordering items in the lists
+# - Modify column widths by updating the 'width' values
+# - Change headers by updating the 'header' values
+# 
+# Each column definition contains:
+# - 'field': The field name in the work item data
+# - 'header': The column header text in Excel
+# - 'width': The column width in Excel
+# ================================================================================
+
+EPIC_COLUMNS = [
+    {'field': 'id', 'header': 'ID', 'width': 10},
+    {'field': 'title', 'header': 'Title', 'width': 40},
+    {'field': 'state', 'header': 'State', 'width': 15},
+    {'field': 'estimated_hours', 'header': 'Estimated Hours', 'width': 15},
+    {'field': 'completed_work', 'header': 'Completed Work', 'width': 15},
+    {'field': 'remaining_work', 'header': 'Remaining Work', 'width': 15},
+    {'field': 'percent_complete', 'header': '% Complete', 'width': 15},
+    {'field': 'assigned_to', 'header': 'Assigned To', 'width': 20},
+]
+
+FEATURE_COLUMNS = [
+    {'field': 'id', 'header': 'ID', 'width': 10},
+    {'field': 'title', 'header': 'Title', 'width': 40},
+    {'field': 'state', 'header': 'State', 'width': 15},
+    {'field': 'epic_id', 'header': 'Epic ID', 'width': 15},
+    {'field': 'epic_title', 'header': 'Epic Title', 'width': 40},
+    {'field': 'estimated_hours', 'header': 'Estimated Hours', 'width': 15},
+    {'field': 'completed_work', 'header': 'Completed Work', 'width': 15},
+    {'field': 'remaining_work', 'header': 'Remaining Work', 'width': 15},
+    {'field': 'percent_complete', 'header': '% Complete', 'width': 15},
+    {'field': 'assigned_to', 'header': 'Assigned To', 'width': 20},
+]
+
+STORY_COLUMNS = [
+    {'field': 'id', 'header': 'ID', 'width': 10},
+    {'field': 'title', 'header': 'Title', 'width': 40},
+    {'field': 'state', 'header': 'State', 'width': 15},
+    {'field': 'feature_id', 'header': 'Feature ID', 'width': 15},
+    {'field': 'feature_title', 'header': 'Feature Title', 'width': 40},
+    {'field': 'estimated_hours', 'header': 'Estimated Hours', 'width': 15},
+    {'field': 'completed_work', 'header': 'Completed Work', 'width': 15},
+    {'field': 'remaining_work', 'header': 'Remaining Work', 'width': 15},
+    {'field': 'percent_complete', 'header': '% Complete', 'width': 15},
+    {'field': 'assigned_to', 'header': 'Assigned To', 'width': 20},
+]
+
+TASK_COLUMNS = [
+    {'field': 'id', 'header': 'ID', 'width': 10},
+    {'field': 'title', 'header': 'Title', 'width': 40},
+    {'field': 'work_item_type', 'header': 'Type', 'width': 15},
+    {'field': 'state', 'header': 'State', 'width': 15},
+    {'field': 'story_id', 'header': 'Story ID', 'width': 15},
+    {'field': 'story_title', 'header': 'Story Title', 'width': 40},
+    {'field': 'estimated_hours', 'header': 'Estimated Hours', 'width': 15},
+    {'field': 'completed_work', 'header': 'Completed Work', 'width': 15},
+    {'field': 'remaining_work', 'header': 'Remaining Work', 'width': 15},
+    {'field': 'percent_complete', 'header': '% Complete', 'width': 15},
+    {'field': 'assigned_to', 'header': 'Assigned To', 'width': 20},
+]
+
+# ================================================================================
+# END COLUMN CONFIGURATION SECTION
+# ================================================================================
+
 class ReportService:
     def __init__(self):
         """Initialize the report service"""
@@ -36,6 +107,12 @@ class ReportService:
                 'border': 1
             })
             
+            # Format for percentage values
+            percent_format = workbook.add_format({
+                'border': 1,
+                'num_format': '0.00%'
+            })
+            
             # Extract custom field names from filters
             custom_field_names = []
             if custom_fields:
@@ -49,16 +126,16 @@ class ReportService:
             
             # Build sheets based on the requested count
             if sheet_count >= 1:
-                self._build_epic_sheet(workbook, data["epics"], header_format, cell_format, custom_field_names)
+                self._build_epic_sheet(workbook, data["epics"], header_format, cell_format, percent_format, custom_field_names)
             
             if sheet_count >= 2:
-                self._build_feature_sheet(workbook, data["features"], header_format, cell_format)
+                self._build_feature_sheet(workbook, data["features"], header_format, cell_format, percent_format)
             
             if sheet_count >= 3:
-                self._build_story_sheet(workbook, data["stories"], header_format, cell_format)
+                self._build_story_sheet(workbook, data["stories"], header_format, cell_format, percent_format)
             
             if sheet_count >= 4:
-                self._build_task_sheet(workbook, data["leaf_items"], header_format, cell_format)
+                self._build_task_sheet(workbook, data["leaf_items"], header_format, cell_format, percent_format)
             
             # Close the workbook to save it
             workbook.close()
@@ -68,204 +145,99 @@ class ReportService:
             logger.exception(f"Error building Excel workbook: {str(e)}")
             raise
     
-    def _build_epic_sheet(self, workbook, epics: List[Dict[str, Any]], header_format, cell_format,
-                          custom_field_names: List[str]) -> None:
+    def _filter_work_items_by_type(self, items: List[Dict[str, Any]], allowed_types: List[str]) -> List[Dict[str, Any]]:
+        """Filter work items by their work item type"""
+        return [item for item in items if item.get("work_item_type", "").lower() in [t.lower() for t in allowed_types]]
+    
+    def _build_sheet_with_config(self, workbook, worksheet_name: str, items: List[Dict[str, Any]], 
+                                 columns_config: List[Dict], header_format, cell_format, percent_format,
+                                 custom_field_names: List[str] = None) -> None:
         """
-        Build the Epic worksheet
+        Generic method to build a worksheet using column configuration
         
         Args:
             workbook: The Excel workbook
-            epics: List of Epic work items
+            worksheet_name: Name of the worksheet
+            items: List of work items
+            columns_config: Column configuration list
             header_format: Format for header cells
             cell_format: Format for data cells
+            percent_format: Format for percentage cells
             custom_field_names: List of custom field names to include
         """
-        worksheet = workbook.add_worksheet("Epics")
+        worksheet = workbook.add_worksheet(worksheet_name)
         
-        # Set column widths
-        worksheet.set_column('A:A', 10)  # ID
-        worksheet.set_column('B:B', 40)  # Title
-        worksheet.set_column('C:C', 15)  # State
-        worksheet.set_column('D:D', 15)  # Estimated Hours
-        worksheet.set_column('E:E', 15)  # Completed Work
-        worksheet.set_column('F:F', 15)  # Remaining Work
-        worksheet.set_column('G:G', 15)  # % Complete
-        worksheet.set_column('H:H', 20)  # Assigned To
+        # Set column widths and write headers
+        headers = []
+        for col_idx, col_config in enumerate(columns_config):
+            worksheet.set_column(col_idx, col_idx, col_config['width'])
+            headers.append(col_config['header'])
         
-        # Base headers
-        headers = [
-            "ID", "Title", "State", "Estimated Hours", 
-            "Completed Work", "Remaining Work", "% Complete", "Assigned To"
-        ]
+        # Add custom field headers if provided
+        if custom_field_names:
+            for field_name in custom_field_names:
+                headers.append(field_name)
+                worksheet.set_column(len(headers)-1, len(headers)-1, 20)  # Default width for custom fields
         
-        # Add custom field headers
-        for field_name in custom_field_names:
-            headers.append(field_name)
-            
         # Write headers
         for col, header in enumerate(headers):
             worksheet.write(0, col, header, header_format)
         
         # Write data rows
-        for row, epic in enumerate(epics, start=1):
-            worksheet.write(row, 0, epic["id"], cell_format)
-            worksheet.write(row, 1, epic["title"], cell_format)
-            worksheet.write(row, 2, epic["state"], cell_format)
-            worksheet.write(row, 3, epic["estimated_hours"], cell_format)
-            worksheet.write(row, 4, epic["completed_work"], cell_format)
-            worksheet.write(row, 5, epic["remaining_work"], cell_format)
-            worksheet.write(row, 6, epic["percent_complete"], cell_format)
-            worksheet.write(row, 7, epic["assigned_to"], cell_format)
+        for row, item in enumerate(items, start=1):
+            # Write configured columns
+            for col_idx, col_config in enumerate(columns_config):
+                field_name = col_config['field']
+                value = item.get(field_name, "")
+                
+                # Use percentage format for percent_complete field
+                if field_name == 'percent_complete':
+                    # Convert to decimal if it's a percentage (divide by 100)
+                    if isinstance(value, (int, float)) and value > 1:
+                        value = value / 100
+                    worksheet.write(row, col_idx, value, percent_format)
+                else:
+                    worksheet.write(row, col_idx, value, cell_format)
             
-            # Write custom field values
-            for col, field_name in enumerate(custom_field_names, start=8):
-                # Try to get the value from the item directly
-                value = epic.get(field_name, "")
-                
-                # If not found and original_fields exists, try there with both with and without Custom. prefix
-                if not value and "original_fields" in epic:
-                    value = epic["original_fields"].get(f"Custom.{field_name}", 
-                                                       epic["original_fields"].get(field_name, ""))
-                
-                worksheet.write(row, col, value, cell_format)
+            # Write custom field values if provided
+            if custom_field_names:
+                for col_offset, field_name in enumerate(custom_field_names):
+                    col_idx = len(columns_config) + col_offset
+                    # Try to get the value from the item directly
+                    value = item.get(field_name, "")
+                    
+                    # If not found and original_fields exists, try there with both with and without Custom. prefix
+                    if not value and "original_fields" in item:
+                        value = item["original_fields"].get(f"Custom.{field_name}", 
+                                                           item["original_fields"].get(field_name, ""))
+                    
+                    worksheet.write(row, col_idx, value, cell_format)
+    
+    def _build_epic_sheet(self, workbook, epics: List[Dict[str, Any]], header_format, cell_format, percent_format,
+                          custom_field_names: List[str]) -> None:
+        """Build the Epic worksheet using configuration"""
+        # Filter to only Epic work items
+        epic_items = self._filter_work_items_by_type(epics, ["Epic"])
+        self._build_sheet_with_config(workbook, "Epics", epic_items, EPIC_COLUMNS, 
+                                      header_format, cell_format, percent_format, custom_field_names)
 
-    def _build_feature_sheet(self, workbook, features: List[Dict[str, Any]], header_format, cell_format) -> None:
-        """
-        Build the Feature worksheet
-        
-        Args:
-            workbook: The Excel workbook
-            features: List of Feature work items
-            header_format: Format for header cells
-            cell_format: Format for data cells
-        """
-        worksheet = workbook.add_worksheet("Features")
-        
-        # Set column widths
-        worksheet.set_column('A:A', 10)  # ID
-        worksheet.set_column('B:B', 40)  # Title
-        worksheet.set_column('C:C', 15)  # State
-        worksheet.set_column('D:D', 15)  # Epic ID
-        worksheet.set_column('E:E', 40)  # Epic Title
-        worksheet.set_column('F:F', 15)  # Estimated Hours
-        worksheet.set_column('G:G', 15)  # Completed Work
-        worksheet.set_column('H:H', 15)  # Remaining Work
-        worksheet.set_column('I:I', 15)  # % Complete
-        worksheet.set_column('J:J', 20)  # Assigned To
-        
-        # Write headers
-        headers = [
-            "ID", "Title", "State", "Epic ID", "Epic Title",
-            "Estimated Hours", "Completed Work", "Remaining Work", 
-            "% Complete", "Assigned To"
-        ]
-        
-        for col, header in enumerate(headers):
-            worksheet.write(0, col, header, header_format)
-        
-        # Write data rows
-        for row, feature in enumerate(features, start=1):
-            worksheet.write(row, 0, feature["id"], cell_format)
-            worksheet.write(row, 1, feature["title"], cell_format)
-            worksheet.write(row, 2, feature["state"], cell_format)
-            worksheet.write(row, 3, feature.get("epic_id", ""), cell_format)
-            worksheet.write(row, 4, feature.get("epic_title", ""), cell_format)
-            worksheet.write(row, 5, feature["estimated_hours"], cell_format)
-            worksheet.write(row, 6, feature["completed_work"], cell_format)
-            worksheet.write(row, 7, feature["remaining_work"], cell_format)
-            worksheet.write(row, 8, feature["percent_complete"], cell_format)
-            worksheet.write(row, 9, feature["assigned_to"], cell_format)
+    def _build_feature_sheet(self, workbook, features: List[Dict[str, Any]], header_format, cell_format, percent_format) -> None:
+        """Build the Feature worksheet using configuration"""
+        # Filter to only Feature work items
+        feature_items = self._filter_work_items_by_type(features, ["Feature"])
+        self._build_sheet_with_config(workbook, "Features", feature_items, FEATURE_COLUMNS, 
+                                      header_format, cell_format, percent_format)
     
-    def _build_story_sheet(self, workbook, stories: List[Dict[str, Any]], header_format, cell_format) -> None:
-        """
-        Build the User Story worksheet
-        
-        Args:
-            workbook: The Excel workbook
-            stories: List of User Story work items
-            header_format: Format for header cells
-            cell_format: Format for data cells
-        """
-        worksheet = workbook.add_worksheet("User Stories")
-        
-        # Set column widths
-        worksheet.set_column('A:A', 10)  # ID
-        worksheet.set_column('B:B', 40)  # Title
-        worksheet.set_column('C:C', 15)  # State
-        worksheet.set_column('D:D', 15)  # Feature ID
-        worksheet.set_column('E:E', 40)  # Feature Title
-        worksheet.set_column('F:F', 15)  # Estimated Hours
-        worksheet.set_column('G:G', 15)  # Completed Work
-        worksheet.set_column('H:H', 15)  # Remaining Work
-        worksheet.set_column('I:I', 15)  # % Complete
-        worksheet.set_column('J:J', 20)  # Assigned To
-        
-        # Write headers
-        headers = [
-            "ID", "Title", "State", "Feature ID", "Feature Title",
-            "Estimated Hours", "Completed Work", "Remaining Work", 
-            "% Complete", "Assigned To"
-        ]
-        
-        for col, header in enumerate(headers):
-            worksheet.write(0, col, header, header_format)
-        
-        # Write data rows
-        for row, story in enumerate(stories, start=1):
-            worksheet.write(row, 0, story["id"], cell_format)
-            worksheet.write(row, 1, story["title"], cell_format)
-            worksheet.write(row, 2, story["state"], cell_format)
-            worksheet.write(row, 3, story.get("feature_id", ""), cell_format)
-            worksheet.write(row, 4, story.get("feature_title", ""), cell_format)
-            worksheet.write(row, 5, story["estimated_hours"], cell_format)
-            worksheet.write(row, 6, story["completed_work"], cell_format)
-            worksheet.write(row, 7, story["remaining_work"], cell_format)
-            worksheet.write(row, 8, story["percent_complete"], cell_format)
-            worksheet.write(row, 9, story["assigned_to"], cell_format)
+    def _build_story_sheet(self, workbook, stories: List[Dict[str, Any]], header_format, cell_format, percent_format) -> None:
+        """Build the User Story worksheet using configuration"""
+        # Filter to only User Story work items
+        story_items = self._filter_work_items_by_type(stories, ["User Story"])
+        self._build_sheet_with_config(workbook, "User Stories", story_items, STORY_COLUMNS, 
+                                      header_format, cell_format, percent_format)
     
-    def _build_task_sheet(self, workbook, tasks: List[Dict[str, Any]], header_format, cell_format) -> None:
-        """
-        Build the Task worksheet
-        
-        Args:
-            workbook: The Excel workbook
-            tasks: List of Task work items
-            header_format: Format for header cells
-            cell_format: Format for data cells
-        """
-        worksheet = workbook.add_worksheet("Tasks")
-        
-        # Set column widths
-        worksheet.set_column('A:A', 10)  # ID
-        worksheet.set_column('B:B', 40)  # Title
-        worksheet.set_column('C:C', 15)  # State
-        worksheet.set_column('D:D', 15)  # Story ID
-        worksheet.set_column('E:E', 40)  # Story Title
-        worksheet.set_column('F:F', 15)  # Estimated Hours
-        worksheet.set_column('G:G', 15)  # Completed Work
-        worksheet.set_column('H:H', 15)  # Remaining Work
-        worksheet.set_column('I:I', 15)  # % Complete
-        worksheet.set_column('J:J', 20)  # Assigned To
-        
-        # Write headers
-        headers = [
-            "ID", "Title", "State", "Story ID", "Story Title",
-            "Estimated Hours", "Completed Work", "Remaining Work", 
-            "% Complete", "Assigned To"
-        ]
-        
-        for col, header in enumerate(headers):
-            worksheet.write(0, col, header, header_format)
-        
-        # Write data rows
-        for row, task in enumerate(tasks, start=1):
-            worksheet.write(row, 0, task["id"], cell_format)
-            worksheet.write(row, 1, task["title"], cell_format)
-            worksheet.write(row, 2, task["state"], cell_format)
-            worksheet.write(row, 3, task.get("story_id", ""), cell_format)
-            worksheet.write(row, 4, task.get("story_title", ""), cell_format)
-            worksheet.write(row, 5, task["estimated_hours"], cell_format)
-            worksheet.write(row, 6, task["completed_work"], cell_format)
-            worksheet.write(row, 7, task["remaining_work"], cell_format)
-            worksheet.write(row, 8, task["percent_complete"], cell_format)
-            worksheet.write(row, 9, task["assigned_to"], cell_format)
+    def _build_task_sheet(self, workbook, tasks: List[Dict[str, Any]], header_format, cell_format, percent_format) -> None:
+        """Build the Task worksheet using configuration"""
+        # Filter to Task, Bug, and QA Validation Task work items
+        task_items = self._filter_work_items_by_type(tasks, ["Task", "Bug", "QA Validation Task"])
+        self._build_sheet_with_config(workbook, "Tasks", task_items, TASK_COLUMNS, 
+                                      header_format, cell_format, percent_format)
