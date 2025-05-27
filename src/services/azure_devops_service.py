@@ -134,11 +134,68 @@ class AzureDevOpsService:
             # Fetch detailed work item data for the IDs
             user_work_items = self._get_work_items_details(work_item_ids)
             
+            # Populate parent information for user work items
+            self._populate_parent_information(user_work_items)
+            
             return user_work_items
             
         except requests.exceptions.RequestException as e:
             logger.error(f"Error fetching user work items: {str(e)}")
             raise
+
+    def _populate_parent_information(self, work_items: List[Dict[str, Any]]) -> None:
+        """
+        Populate parent information for work items by querying their parent relationships
+        """
+        logger.info("Populating parent information for work items...")
+        
+        for item in work_items:
+            item_id = item["id"]
+            
+            try:
+                # Use WIQL to find parent work items
+                wiql = {
+                    "query": f"""
+                    SELECT [System.Id] 
+                    FROM WorkItemLinks 
+                    WHERE ([Target].[System.Id] = {item_id}) 
+                    AND ([System.Links.LinkType] = 'System.LinkTypes.Hierarchy-Forward')
+                    """
+                }
+                
+                # Execute WIQL query
+                response = requests.post(
+                    f"{self.base_url}/wit/wiql?api-version={self.api_version}",
+                    headers=self.headers,
+                    json=wiql
+                )
+                response.raise_for_status()
+                
+                data = response.json()
+                work_item_relations = data.get("workItemRelations", [])
+                
+                # Find parent work item
+                parent_id = None
+                for relation in work_item_relations:
+                    source = relation.get("source")
+                    if source and source.get("id"):
+                        parent_id = source["id"]
+                        break
+                
+                if parent_id:
+                    # Get parent work item details
+                    parent_items = self._get_work_items_details([parent_id])
+                    if parent_items:
+                        parent_item = parent_items[0]
+                        item["parent_id"] = parent_id
+                        item["parent_type"] = parent_item.get("type", "")
+                        item["parent_title"] = parent_item.get("title", "")
+                        
+                        logger.debug(f"Work item {item_id} has parent {parent_id} ({parent_item.get('type')})")
+                
+            except Exception as e:
+                logger.warning(f"Error fetching parent for work item {item_id}: {str(e)}")
+                continue
 
     def _filter_work_items_by_custom_fields(self, work_items: List[Dict[str, Any]], 
                                           custom_field_filters: List[Dict[str, str]]) -> List[Dict[str, Any]]:
@@ -198,210 +255,7 @@ class AzureDevOpsService:
                 
         return filtered_items
     
-    def _get_work_items_details(self, work_item_ids: List[int]) -> List[Dict[str, Any]]:
-        """
-        Get detailed information for multiple work items
-        """
-        # Batch requests in groups of 200 (Azure DevOps API limit)
-        batch_size = 200
-        all_items = []
-        
-        for i in range(0, len(work_item_ids), batch_size):
-            batch_ids = work_item_ids[i:i+batch_size]
-            ids_string = ",".join(map(str, batch_ids))
-            
-            try:
-                # Request work item details with $expand=all to get all fields including custom fields
-                url = f"{self.base_url}/wit/workitems?ids={ids_string}&$expand=all&api-version={self.api_version}"
-                logger.info(f"API Call 2: GET {url}")
-                
-                response = requests.get(url, headers=self.headers)
-                
-                logger.info(f"API Call 2 Response Status: {response.status_code}")
-                if response.status_code != 200:
-                    logger.error(f"API Call 2 Response Body: {response.text}")
-                
-                response.raise_for_status()
-                
-                batch_data = response.json()
-                logger.info(f"API Call 2 Response: Found {len(batch_data.get('value', []))} work items")
-                
-                all_items.extend(batch_data.get("value", []))
-                
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Error fetching work item details: {str(e)}")
-                raise
-        
-        # Transform response into a more usable format
-        transformed_items = []
-        for item in all_items:
-            transformed = self._transform_work_item(item)
-            transformed_items.append(transformed)
-        
-        return transformed_items
-    
-    def _transform_work_item(self, work_item: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Transform a work item response into a more usable format
-        """
-        fields = work_item.get("fields", {})
-        work_item_type = fields.get("System.WorkItemType", "")
-        
-        # Basic fields that are present in all work items
-        result = {
-            "id": work_item.get("id"),
-            "url": work_item.get("url"),
-            "type": work_item_type,
-            "work_item_type": work_item_type,
-            "title": fields.get("System.Title", ""),
-            "state": fields.get("System.State", ""),
-            "created_date": fields.get("System.CreatedDate", ""),
-            "assigned_to": fields.get("System.AssignedTo", {}).get("displayName", "") if isinstance(fields.get("System.AssignedTo"), dict) else fields.get("System.AssignedTo", ""),
-            # Store the original fields for reference in filtering
-            "original_fields": fields,
-            # Initialize parent info
-            "parent_type": "",
-            "parent_id": "",
-            "parent_title": ""
-        }
-        
-        # Metrics - handle fields that may not exist in some work items
-        result["estimated_hours"] = float(fields.get("Microsoft.VSTS.Scheduling.OriginalEstimate", 0) or 0)
-        result["completed_work"] = float(fields.get("Microsoft.VSTS.Scheduling.CompletedWork", 0) or 0)
-        result["remaining_work"] = float(fields.get("Microsoft.VSTS.Scheduling.RemainingWork", 0) or 0)
-        
-        # Calculate percent complete (as decimal between 0 and 1)
-        est = result["estimated_hours"]
-        comp = result["completed_work"]
-        result["percent_complete"] = comp / est if est > 0 else 0
-        
-        # Add all custom fields to the result
-        for field_name, field_value in fields.items():
-            if field_name.startswith("Custom."):
-                simple_name = field_name.split('.')[-1]
-                result[simple_name] = field_value
-        
-        return result
-    
-    def _get_all_descendant_work_items(self, epic_ids: List[int]) -> Dict[str, List[Dict[str, Any]]]:
-        """
-        Get all work items that are descendants of the given epic IDs, regardless of hierarchy violations
-        """
-        all_descendants = []
-        processed_ids = set()
-        
-        # Start with the epic IDs
-        current_level = epic_ids
-        
-        while current_level:
-            next_level = []
-            
-            for parent_id in current_level:
-                if parent_id in processed_ids:
-                    continue
-                    
-                processed_ids.add(parent_id)
-                
-                # Get direct children
-                children = self._get_child_work_items(parent_id)
-                
-                for child in children:
-                    child_id = child["id"]
-                    if child_id not in processed_ids:
-                        # Set parent information
-                        child["parent_id"] = parent_id
-                        
-                        # Find parent info from already processed items
-                        parent_item = None
-                        for item in all_descendants:
-                            if item["id"] == parent_id:
-                                parent_item = item
-                                break
-                        
-                        if parent_item:
-                            child["parent_type"] = parent_item["type"]
-                            child["parent_title"] = parent_item["title"]
-                        
-                        all_descendants.append(child)
-                        next_level.append(child_id)
-            
-            current_level = next_level
-        
-        # Categorize by work item type
-        epics = []
-        features = []
-        stories = []
-        leaf_items = []
-        
-        for item in all_descendants:
-            item_type = item.get("type", "").lower()
-            
-            if item_type == "epic":
-                epics.append(item)
-            elif item_type == "feature":
-                features.append(item)
-            elif item_type == "user story":
-                stories.append(item)
-            elif item_type in ["task", "bug", "qa validation task"]:
-                leaf_items.append(item)
-            else:
-                # Handle unknown types - add to leaf items
-                leaf_items.append(item)
-        
-        return {
-            "epics": epics,
-            "features": features,
-            "stories": stories,
-            "leaf_items": leaf_items
-        }
-    
-    def _get_child_work_items(self, parent_id: int) -> List[Dict[str, Any]]:
-        """
-        Get child work items for a given parent work item
-        """
-        try:
-            # Use WIQL to find child work items
-            wiql = {
-                "query": f"""
-                SELECT [System.Id] 
-                FROM WorkItemLinks 
-                WHERE ([Source].[System.Id] = {parent_id}) 
-                AND ([System.Links.LinkType] = 'System.LinkTypes.Hierarchy-Forward')
-                """
-            }
-            
-            logger.debug(f"Getting children for work item {parent_id}")
-            
-            # Execute WIQL query
-            response = requests.post(
-                f"{self.base_url}/wit/wiql?api-version={self.api_version}",
-                headers=self.headers,
-                json=wiql
-            )
-            response.raise_for_status()
-            
-            data = response.json()
-            
-            # Extract child work item IDs from the workItemRelations
-            child_ids = []
-            work_item_relations = data.get("workItemRelations", [])
-            
-            for relation in work_item_relations:
-                # Skip the source item (parent)
-                if relation.get("source") is not None:
-                    target = relation.get("target")
-                    if target and target.get("id"):
-                        child_ids.append(target["id"])
-            
-            if not child_ids:
-                return []
-            
-            # Get detailed information for child work items
-            return self._get_work_items_details(child_ids)
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error fetching child work items for parent {parent_id}: {str(e)}")
-            return []
+    # ... keep existing code (_get_work_items_details, _transform_work_item, _get_all_descendant_work_items, _get_child_work_items methods) the same ...
 
     def _aggregate_hours_from_descendants(self, work_items: List[Dict[str, Any]], 
                                          all_work_items: List[Dict[str, Any]]) -> None:
@@ -498,6 +352,39 @@ class AzureDevOpsService:
         
         return capex_estimated / total_estimated
 
+    def _classify_work_items_as_capex(self, work_items: List[Dict[str, Any]], 
+                                    capex_epics: List[Dict[str, Any]]) -> None:
+        """
+        Classify work items as CAPEX or non-CAPEX based on whether they belong to CAPEX epics
+        """
+        if not capex_epics:
+            # If no CAPEX epics, all items are non-CAPEX
+            for item in work_items:
+                item["capex_classification"] = "non-CAPEX"
+            return
+        
+        capex_epic_ids = {epic["id"] for epic in capex_epics}
+        
+        # Get all descendants of CAPEX epics
+        capex_descendants = self._get_all_descendant_work_items(list(capex_epic_ids))
+        all_capex_items = []
+        all_capex_items.extend(capex_descendants["epics"])
+        all_capex_items.extend(capex_descendants["features"])
+        all_capex_items.extend(capex_descendants["stories"])
+        all_capex_items.extend(capex_descendants["leaf_items"])
+        
+        # Add the original CAPEX epics to the list
+        all_capex_items.extend(capex_epics)
+        
+        capex_item_ids = {item["id"] for item in all_capex_items}
+        
+        # Classify work items
+        for item in work_items:
+            if item["id"] in capex_item_ids:
+                item["capex_classification"] = "CAPEX"
+            else:
+                item["capex_classification"] = "non-CAPEX"
+
     def traverse_hierarchy(self, epics: List[Dict[str, Any]], custom_field_filters: List[Dict[str, str]] = None) -> Dict[str, Any]:
         """
         Traverse the work item hierarchy starting from epics, including items that don't follow strict hierarchy
@@ -531,10 +418,18 @@ class AzureDevOpsService:
             "leaf_items": descendants["leaf_items"]
         }
 
-    def organize_user_work_items(self, user_work_items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def organize_user_work_items(self, user_work_items: List[Dict[str, Any]], 
+                               capex_epics: List[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
-        Organize user work items by type and perform hour aggregation
+        Organize user work items by type, perform hour aggregation, and classify as CAPEX/non-CAPEX
         """
+        # Classify work items as CAPEX or non-CAPEX
+        if capex_epics:
+            self._classify_work_items_as_capex(user_work_items, capex_epics)
+        else:
+            for item in user_work_items:
+                item["capex_classification"] = "non-CAPEX"
+        
         epics = []
         features = []
         stories = []

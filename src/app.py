@@ -1,4 +1,3 @@
-
 from flask import Flask, request, jsonify
 import logging
 import os
@@ -228,6 +227,9 @@ def generate_user_report_api():
             capex_percentage:
               type: number
               description: Percentage of work corresponding to CAPEX fields
+            capex_classification:
+              type: string
+              description: Work items are classified as CAPEX or non-CAPEX based on whether they belong to CAPEX epics
       400:
         description: Bad request - missing required parameters
       500:
