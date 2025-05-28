@@ -1,462 +1,743 @@
 
 import requests
-import base64
-import json
 import logging
+import json
 from datetime import datetime
-from typing import List, Dict, Any, Optional, Set
+from typing import Dict, List, Any, Optional
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
 class AzureDevOpsService:
     def __init__(self, pat: str, organization: str, project: str):
+        self.pat = pat
         self.organization = organization
         self.project = project
-        self.base_url = f"https://dev.azure.com/{organization}/{project}/_apis"
+        self.base_url = f"https://dev.azure.com/{organization}/{project}/_apis/wit"
         self.headers = {
-            "Authorization": f"Basic {self._encode_pat(pat)}",
-            "Content-Type": "application/json"
+            'Content-Type': 'application/json',
+            'Authorization': f'Basic {self._encode_pat(pat)}'
         }
-        self.api_version = "7.0"  # Using a recent API version
-    
+
     def _encode_pat(self, pat: str) -> str:
-        """Encode the Personal Access Token for use in the Authorization header"""
-        token = f":{pat}"
-        return base64.b64encode(token.encode()).decode()
-    
+        """Encode PAT for basic authentication"""
+        import base64
+        return base64.b64encode(f":{pat}".encode()).decode()
+
     def get_timestamp(self) -> str:
-        """Get current timestamp formatted for filenames"""
+        """Get current timestamp for file naming"""
         return datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    def fetch_epics(self, custom_field_filters: List[Dict[str, str]] = None, filter_date: str = None) -> List[Dict[str, Any]]:
+    def fetch_epics(self, custom_fields: List[Dict[str, str]] = None, filter_date: str = None) -> List[Dict[str, Any]]:
         """
-        Fetch Epics from Azure DevOps with filtering done locally
+        Fetch Epics from Azure DevOps with optional custom field filtering and date filtering
+        
+        Args:
+            custom_fields: List of custom field objects with key and value for filtering
+            filter_date: Optional date string (YYYY-MM-DD) to filter work items created on or after this date
+            
+        Returns:
+            List of Epic work items
         """
-        # Base WIQL query to fetch only Epic work items
-        wiql = {
-            "query": "SELECT [System.Id] FROM WorkItems WHERE [System.WorkItemType] = 'Epic'"
-        }
-        
-        # Add date filter if provided
-        if filter_date:
-            logger.info(f"Filtering work items created on or after {filter_date}")
-            wiql["query"] += f" AND [System.CreatedDate] >= '{filter_date}'"
-        
         try:
-            # Log the WIQL query for debugging
-            logger.debug(f"WIQL Query: {wiql['query']}")
-            logger.info(f"API Call 1: POST {self.base_url}/wit/wiql?api-version={self.api_version}")
-            logger.info(f"API Call 1 Body: {json.dumps(wiql)}")
+            logger.info("Fetching Epics from Azure DevOps...")
             
-            # Make API call to execute WIQL query
-            response = requests.post(
-                f"{self.base_url}/wit/wiql?api-version={self.api_version}",
-                headers=self.headers,
-                json=wiql
-            )
+            # Build WIQL query for Epics
+            wiql_query = "SELECT [System.Id] FROM WorkItems WHERE [System.WorkItemType] = 'Epic'"
             
-            # Check for error in the response
-            if not response.ok:
-                try:
-                    error_data = response.json()
-                    logger.error(f"Error response from WIQL API: {json.dumps(error_data)}")
-                except:
-                    logger.error(f"Error response from WIQL API: {response.text}")
-                
-                response.raise_for_status()
-            
-            # Parse response and extract work item IDs
-            data = response.json()
-            work_item_ids = [item["id"] for item in data.get("workItems", [])]
-            
-            if not work_item_ids:
-                logger.info("No Epic work items found matching the date criteria")
-                return []
-            
-            logger.info(f"Found {len(work_item_ids)} Epic work items before custom field filtering")
-            
-            # Fetch detailed work item data for the IDs
-            all_epics = self._get_work_items_details(work_item_ids)
-            
-            # If no custom field filters, return all epics
-            if not custom_field_filters:
-                return all_epics
-            
-            # Apply custom field filters locally
-            logger.info(f"Applying {len(custom_field_filters)} custom field filters locally")
-            filtered_epics = self._filter_work_items_by_custom_fields(all_epics, custom_field_filters)
-            
-            logger.info(f"{len(filtered_epics)} epics remain after applying custom field filters")
-            return filtered_epics
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error fetching Epics: {str(e)}")
-            raise
-
-    def fetch_user_work_items(self, assigned_to: str, custom_field_filters: List[Dict[str, str]] = None, 
-                             filter_date: str = None) -> List[Dict[str, Any]]:
-        """
-        Fetch all work items assigned to a specific user
-        """
-        # Build WIQL query to fetch work items assigned to the user
-        wiql = {
-            "query": f"SELECT [System.Id] FROM WorkItems WHERE [System.AssignedTo] = '{assigned_to}'"
-        }
-        
-        # Add date filter if provided
-        if filter_date:
-            logger.info(f"Filtering work items created on or after {filter_date}")
-            wiql["query"] += f" AND [System.CreatedDate] >= '{filter_date}'"
-        
-        try:
-            logger.info(f"Fetching work items for user: {assigned_to}")
-            logger.debug(f"WIQL Query: {wiql['query']}")
-            
-            # Make API call to execute WIQL query
-            response = requests.post(
-                f"{self.base_url}/wit/wiql?api-version={self.api_version}",
-                headers=self.headers,
-                json=wiql
-            )
-            
-            response.raise_for_status()
-            
-            # Parse response and extract work item IDs
-            data = response.json()
-            work_item_ids = [item["id"] for item in data.get("workItems", [])]
-            
-            if not work_item_ids:
-                logger.info(f"No work items found assigned to {assigned_to}")
-                return []
-            
-            logger.info(f"Found {len(work_item_ids)} work items assigned to {assigned_to}")
-            
-            # Fetch detailed work item data for the IDs
-            user_work_items = self._get_work_items_details(work_item_ids)
-            
-            # Populate parent information for user work items
-            self._populate_parent_information(user_work_items)
-            
-            return user_work_items
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error fetching user work items: {str(e)}")
-            raise
-
-    def _populate_parent_information(self, work_items: List[Dict[str, Any]]) -> None:
-        """
-        Populate parent information for work items by querying their parent relationships
-        """
-        logger.info("Populating parent information for work items...")
-        
-        for item in work_items:
-            item_id = item["id"]
-            
-            try:
-                # Use WIQL to find parent work items
-                wiql = {
-                    "query": f"""
-                    SELECT [System.Id] 
-                    FROM WorkItemLinks 
-                    WHERE ([Target].[System.Id] = {item_id}) 
-                    AND ([System.Links.LinkType] = 'System.LinkTypes.Hierarchy-Forward')
-                    """
-                }
-                
-                # Execute WIQL query
-                response = requests.post(
-                    f"{self.base_url}/wit/wiql?api-version={self.api_version}",
-                    headers=self.headers,
-                    json=wiql
-                )
-                response.raise_for_status()
-                
-                data = response.json()
-                work_item_relations = data.get("workItemRelations", [])
-                
-                # Find parent work item
-                parent_id = None
-                for relation in work_item_relations:
-                    source = relation.get("source")
-                    if source and source.get("id"):
-                        parent_id = source["id"]
-                        break
-                
-                if parent_id:
-                    # Get parent work item details
-                    parent_items = self._get_work_items_details([parent_id])
-                    if parent_items:
-                        parent_item = parent_items[0]
-                        item["parent_id"] = parent_id
-                        item["parent_type"] = parent_item.get("type", "")
-                        item["parent_title"] = parent_item.get("title", "")
+            # Add custom field filters if provided
+            if custom_fields:
+                for field in custom_fields:
+                    field_name = field.get("key", "")
+                    field_value = field.get("value", "")
+                    
+                    if field_name and field_value:
+                        # Add Custom. prefix if not already present and it's a custom field
+                        if not field_name.startswith('Custom.') and not field_name.startswith('System.'):
+                            field_name = f"Custom.{field_name}"
                         
-                        logger.debug(f"Work item {item_id} has parent {parent_id} ({parent_item.get('type')})")
-                
-            except Exception as e:
-                logger.warning(f"Error fetching parent for work item {item_id}: {str(e)}")
-                continue
+                        wiql_query += f" AND [{field_name}] = '{field_value}'"
+            
+            # Add date filter if provided
+            if filter_date:
+                wiql_query += f" AND [System.CreatedDate] >= '{filter_date}'"
+            
+            logger.info(f"WIQL Query for Epics: {wiql_query}")
+            
+            # Execute WIQL query
+            wiql_url = f"{self.base_url}/wiql?api-version=6.0"
+            wiql_payload = {"query": wiql_query}
+            
+            logger.debug(f"Making WIQL request to: {wiql_url}")
+            wiql_response = requests.post(wiql_url, headers=self.headers, json=wiql_payload)
+            wiql_response.raise_for_status()
+            
+            work_item_ids = [item['id'] for item in wiql_response.json().get('workItems', [])]
+            logger.info(f"Found {len(work_item_ids)} Epic IDs matching criteria")
+            
+            if not work_item_ids:
+                logger.warning("No Epic work items found matching the criteria")
+                return []
+            
+            # Fetch detailed work item information
+            epics = self._fetch_work_items_details(work_item_ids)
+            logger.info(f"Successfully fetched {len(epics)} Epic work items")
+            
+            return epics
+            
+        except Exception as e:
+            logger.exception(f"Error fetching Epics: {str(e)}")
+            raise
 
-    def _filter_work_items_by_custom_fields(self, work_items: List[Dict[str, Any]], 
-                                          custom_field_filters: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+    def fetch_user_work_items(self, assigned_to: str, custom_fields: List[Dict[str, str]] = None, filter_date: str = None) -> List[Dict[str, Any]]:
         """
-        Filter work items based on custom field criteria
+        Fetch work items assigned to a specific user
+        
+        Args:
+            assigned_to: Name of the user to filter work items by assignment
+            custom_fields: List of custom field objects with key and value for filtering
+            filter_date: Optional date string (YYYY-MM-DD) to filter work items created on or after this date
+            
+        Returns:
+            List of work items assigned to the user
         """
-        if not custom_field_filters:
+        try:
+            logger.info(f"Fetching work items assigned to {assigned_to}...")
+            
+            # Build WIQL query for user's work items
+            wiql_query = f"SELECT [System.Id] FROM WorkItems WHERE [System.AssignedTo] = '{assigned_to}'"
+            
+            # Add custom field filters if provided
+            if custom_fields:
+                for field in custom_fields:
+                    field_name = field.get("key", "")
+                    field_value = field.get("value", "")
+                    
+                    if field_name and field_value:
+                        # Add Custom. prefix if not already present and it's a custom field
+                        if not field_name.startswith('Custom.') and not field_name.startswith('System.'):
+                            field_name = f"Custom.{field_name}"
+                        
+                        wiql_query += f" AND [{field_name}] = '{field_value}'"
+            
+            # Add date filter if provided
+            if filter_date:
+                wiql_query += f" AND [System.CreatedDate] >= '{filter_date}'"
+            
+            logger.info(f"WIQL Query for user work items: {wiql_query}")
+            
+            # Execute WIQL query
+            wiql_url = f"{self.base_url}/wiql?api-version=6.0"
+            wiql_payload = {"query": wiql_query}
+            
+            wiql_response = requests.post(wiql_url, headers=self.headers, json=wiql_payload)
+            wiql_response.raise_for_status()
+            
+            work_item_ids = [item['id'] for item in wiql_response.json().get('workItems', [])]
+            logger.info(f"Found {len(work_item_ids)} work item IDs for user {assigned_to}")
+            
+            if not work_item_ids:
+                logger.warning(f"No work items found assigned to {assigned_to}")
+                return []
+            
+            # Fetch detailed work item information
+            work_items = self._fetch_work_items_details(work_item_ids)
+            logger.info(f"Successfully fetched {len(work_items)} work items for user {assigned_to}")
+            
             return work_items
             
-        filtered_items = []
-        
-        for item in work_items:
-            matches_all_filters = True
-            
-            for field_filter in custom_field_filters:
-                if not field_filter.get("key") or "value" not in field_filter:
-                    continue
-                    
-                field_name = field_filter["key"]
-                expected_value = field_filter["value"]
-                
-                # Find the actual field value
-                actual_value = None
-                
-                # Strategy 1: Check if field name already has Custom. prefix
-                if field_name.startswith("Custom."):
-                    # Look in original_fields with exact key
-                    if "original_fields" in item:
-                        actual_value = item["original_fields"].get(field_name)
-                        
-                    # Also check the simplified name in the item
-                    simple_name = field_name[7:]  # Remove "Custom." prefix
-                    if actual_value is None and simple_name in item:
-                        actual_value = item[simple_name]
-                else:
-                    # Strategy 2: Field name without prefix - check both ways
-                    # First check the item directly
-                    if field_name in item:
-                        actual_value = item[field_name]
-                    
-                    # Then check with Custom. prefix in original_fields
-                    if actual_value is None and "original_fields" in item:
-                        actual_value = item["original_fields"].get(f"Custom.{field_name}")
-                
-                # Compare values (case-insensitive)
-                if actual_value is None:
-                    logger.debug(f"Field '{field_name}' not found in work item {item['id']}")
-                    matches_all_filters = False
-                    break
-                elif str(actual_value).strip().lower() != str(expected_value).strip().lower():
-                    logger.debug(f"Field '{field_name}' value mismatch in work item {item['id']}: '{actual_value}' != '{expected_value}'")
-                    matches_all_filters = False
-                    break
-            
-            if matches_all_filters:
-                filtered_items.append(item)
-                
-        return filtered_items
-    
-    # ... keep existing code (_get_work_items_details, _transform_work_item, _get_all_descendant_work_items, _get_child_work_items methods) the same ...
+        except Exception as e:
+            logger.exception(f"Error fetching user work items: {str(e)}")
+            raise
 
-    def _aggregate_hours_from_descendants(self, work_items: List[Dict[str, Any]], 
-                                         all_work_items: List[Dict[str, Any]]) -> None:
+    def calculate_capex_percentage(self, user_work_items: List[Dict[str, Any]], capex_epics: List[Dict[str, Any]]) -> float:
         """
-        Aggregate hours from descendant work items for parent work items
-        """
-        logger.info("Starting hour aggregation for parent work items...")
+        Calculate the percentage of user's work that corresponds to CAPEX epics
         
-        # Create lookup dict for fast access
-        work_item_lookup = {item["id"]: item for item in all_work_items}
-        
-        # Build parent-child relationships
-        children_map = {}
-        for item in all_work_items:
-            parent_id = item.get("parent_id")
-            if parent_id:
-                if parent_id not in children_map:
-                    children_map[parent_id] = []
-                children_map[parent_id].append(item["id"])
-        
-        def get_all_descendants(parent_id: int) -> List[int]:
-            """Recursively get all descendant IDs"""
-            descendants = []
-            direct_children = children_map.get(parent_id, [])
+        Args:
+            user_work_items: List of work items assigned to the user
+            capex_epics: List of Epic work items that match CAPEX criteria
             
-            for child_id in direct_children:
-                descendants.append(child_id)
-                descendants.extend(get_all_descendants(child_id))
+        Returns:
+            Percentage of work corresponding to CAPEX epics
+        """
+        try:
+            if not user_work_items or not capex_epics:
+                return 0.0
+            
+            capex_epic_ids = {epic['id'] for epic in capex_epics}
+            logger.info(f"CAPEX Epic IDs: {capex_epic_ids}")
+            
+            total_hours = 0.0
+            capex_hours = 0.0
+            
+            for work_item in user_work_items:
+                estimated_hours = work_item.get('estimated_hours', 0) or 0
+                total_hours += estimated_hours
+                
+                # Check if this work item belongs to a CAPEX epic
+                if self._belongs_to_capex_epic(work_item, capex_epic_ids):
+                    capex_hours += estimated_hours
+                    logger.debug(f"Work item {work_item['id']} belongs to CAPEX epic")
+            
+            if total_hours == 0:
+                return 0.0
+            
+            percentage = capex_hours / total_hours
+            logger.info(f"CAPEX calculation: {capex_hours}/{total_hours} = {percentage:.2%}")
+            
+            return percentage
+            
+        except Exception as e:
+            logger.exception(f"Error calculating CAPEX percentage: {str(e)}")
+            return 0.0
+
+    def _belongs_to_capex_epic(self, work_item: Dict[str, Any], capex_epic_ids: set) -> bool:
+        """Check if a work item belongs to any of the CAPEX epics"""
+        try:
+            # Check if the work item itself is a CAPEX epic
+            if work_item['id'] in capex_epic_ids:
+                return True
+            
+            # Traverse up the hierarchy to find if it belongs to a CAPEX epic
+            current_item = work_item
+            visited = set()  # Prevent infinite loops
+            
+            while current_item and current_item['id'] not in visited:
+                visited.add(current_item['id'])
+                
+                # Get parent information
+                parent_url = current_item.get('parent_url')
+                if not parent_url:
+                    break
+                
+                try:
+                    parent_id = int(parent_url.split('/')[-1])
+                    if parent_id in capex_epic_ids:
+                        return True
+                    
+                    # Fetch parent details to continue traversal
+                    parent_details = self._fetch_work_items_details([parent_id])
+                    if parent_details:
+                        current_item = parent_details[0]
+                    else:
+                        break
+                        
+                except (ValueError, IndexError, requests.RequestException):
+                    break
+            
+            return False
+            
+        except Exception as e:
+            logger.exception(f"Error checking CAPEX epic membership: {str(e)}")
+            return False
+
+    def organize_user_work_items(self, work_items: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Organize user work items by type without rollup calculation, but with parent information and CAPEX classification
+        
+        Args:
+            work_items: List of work items to organize
+            
+        Returns:
+            Dictionary with work items organized by type
+        """
+        try:
+            logger.info(f"Organizing {len(work_items)} user work items by type...")
+            
+            # First, populate parent information for all work items
+            work_items_with_parents = self._populate_parent_information(work_items)
+            
+            # Organize by type
+            organized = {
+                "epics": [],
+                "features": [],
+                "stories": [],
+                "leaf_items": []
+            }
+            
+            for item in work_items_with_parents:
+                work_item_type = item.get("type", "").strip()
+                
+                if work_item_type.lower() == "epic":
+                    organized["epics"].append(item)
+                elif work_item_type.lower() == "feature":
+                    organized["features"].append(item)
+                elif work_item_type.lower() == "user story":
+                    organized["stories"].append(item)
+                elif work_item_type.lower() in ["task", "bug", "qa validation task"]:
+                    organized["leaf_items"].append(item)
+                else:
+                    # Default to leaf_items for unknown types
+                    organized["leaf_items"].append(item)
+            
+            logger.info(f"Organized work items: {len(organized['epics'])} epics, {len(organized['features'])} features, {len(organized['stories'])} stories, {len(organized['leaf_items'])} tasks/bugs/qa")
+            
+            return organized
+            
+        except Exception as e:
+            logger.exception(f"Error organizing user work items: {str(e)}")
+            raise
+
+    def _populate_parent_information(self, work_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Populate parent information for work items
+        
+        Args:
+            work_items: List of work items to process
+            
+        Returns:
+            List of work items with parent information populated
+        """
+        try:
+            logger.info("Populating parent information for work items...")
+            
+            # Create a mapping of work item IDs to work items for quick lookup
+            work_item_map = {item['id']: item for item in work_items}
+            
+            for item in work_items:
+                parent_url = item.get('parent_url')
+                if parent_url:
+                    try:
+                        parent_id = int(parent_url.split('/')[-1])
+                        
+                        # Check if parent is in our current work items
+                        if parent_id in work_item_map:
+                            parent_item = work_item_map[parent_id]
+                            item['parent_type'] = parent_item.get('type', '')
+                            item['parent_id'] = parent_id
+                            item['parent_title'] = parent_item.get('title', '')
+                        else:
+                            # Fetch parent details from API
+                            parent_details = self._fetch_work_items_details([parent_id])
+                            if parent_details:
+                                parent = parent_details[0]
+                                item['parent_type'] = parent.get('type', '')
+                                item['parent_id'] = parent_id
+                                item['parent_title'] = parent.get('title', '')
+                    except (ValueError, IndexError):
+                        logger.warning(f"Could not parse parent URL: {parent_url}")
+                        item['parent_type'] = ''
+                        item['parent_id'] = ''
+                        item['parent_title'] = ''
+                else:
+                    item['parent_type'] = ''
+                    item['parent_id'] = ''
+                    item['parent_title'] = ''
+            
+            return work_items
+            
+        except Exception as e:
+            logger.exception(f"Error populating parent information: {str(e)}")
+            return work_items
+
+    # ... keep existing code (all other methods remain the same)
+
+    def traverse_hierarchy(self, epics: List[Dict[str, Any]], custom_fields: List[Dict[str, str]] = None) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Traverse the Epic hierarchy and collect all related work items with flexible hierarchy support
+        
+        Args:
+            epics: List of Epic work items to traverse
+            custom_fields: List of custom fields for filtering
+            
+        Returns:
+            Dictionary containing organized work items by type
+        """
+        try:
+            logger.info(f"Starting hierarchy traversal for {len(epics)} Epics...")
+            
+            all_work_items = []
+            processed_ids = set()
+            
+            # Process each Epic and collect all descendants
+            for epic in epics:
+                logger.info(f"Processing Epic {epic['id']}: {epic.get('title', 'No Title')}")
+                epic_descendants = self._get_all_descendants(epic['id'], processed_ids)
+                all_work_items.extend(epic_descendants)
+                
+                # Add the epic itself if not already processed
+                if epic['id'] not in processed_ids:
+                    all_work_items.append(epic)
+                    processed_ids.add(epic['id'])
+            
+            logger.info(f"Collected {len(all_work_items)} total work items in hierarchy")
+            
+            # Populate parent information for all work items
+            all_work_items = self._populate_parent_information_for_hierarchy(all_work_items)
+            
+            # Aggregate hours from children to parents
+            all_work_items = self._aggregate_hours_from_descendants(all_work_items)
+            
+            # Organize work items by type
+            organized_data = {
+                "epics": [],
+                "features": [],
+                "stories": [],
+                "leaf_items": []
+            }
+            
+            for item in all_work_items:
+                work_item_type = item.get("type", "").strip()
+                
+                if work_item_type.lower() == "epic":
+                    organized_data["epics"].append(item)
+                elif work_item_type.lower() == "feature":
+                    organized_data["features"].append(item)
+                elif work_item_type.lower() == "user story":
+                    organized_data["stories"].append(item)
+                elif work_item_type.lower() in ["task", "bug", "qa validation task"]:
+                    organized_data["leaf_items"].append(item)
+                else:
+                    # For unknown types, add them to leaf_items
+                    organized_data["leaf_items"].append(item)
+            
+            logger.info(f"Organized hierarchy: {len(organized_data['epics'])} epics, {len(organized_data['features'])} features, {len(organized_data['stories'])} stories, {len(organized_data['leaf_items'])} tasks/bugs/qa")
+            
+            return organized_data
+            
+        except Exception as e:
+            logger.exception(f"Error traversing hierarchy: {str(e)}")
+            raise
+
+    def _get_all_descendants(self, work_item_id: int, processed_ids: set) -> List[Dict[str, Any]]:
+        """
+        Recursively get all descendants of a work item using flexible hierarchy queries
+        
+        Args:
+            work_item_id: ID of the work item to get descendants for
+            processed_ids: Set of already processed work item IDs to avoid duplicates
+            
+        Returns:
+            List of all descendant work items
+        """
+        try:
+            descendants = []
+            
+            if work_item_id in processed_ids:
+                return descendants
+            
+            # Get direct children using relations
+            children = self._get_direct_children(work_item_id)
+            
+            for child in children:
+                child_id = child['id']
+                
+                if child_id not in processed_ids:
+                    descendants.append(child)
+                    processed_ids.add(child_id)
+                    
+                    # Recursively get descendants of this child
+                    child_descendants = self._get_all_descendants(child_id, processed_ids)
+                    descendants.extend(child_descendants)
             
             return descendants
-        
-        # Process each work item for aggregation
-        for item in work_items:
-            item_type = item.get("type", "").lower()
             
-            # Only aggregate for parent work items (Epic, Feature, User Story)
-            if item_type in ["epic", "feature", "user story"]:
-                descendant_ids = get_all_descendants(item["id"])
+        except Exception as e:
+            logger.exception(f"Error getting descendants for work item {work_item_id}: {str(e)}")
+            return []
+
+    def _get_direct_children(self, work_item_id: int) -> List[Dict[str, Any]]:
+        """
+        Get direct children of a work item using work item relations
+        
+        Args:
+            work_item_id: ID of the parent work item
+            
+        Returns:
+            List of direct child work items
+        """
+        try:
+            # Fetch work item with relations
+            url = f"{self.base_url}/workitems/{work_item_id}?$expand=relations&api-version=6.0"
+            response = requests.get(url, headers=self.headers)
+            response.raise_for_status()
+            
+            work_item_data = response.json()
+            relations = work_item_data.get('relations', [])
+            
+            # Extract child work item IDs from relations
+            child_ids = []
+            for relation in relations:
+                rel_type = relation.get('rel', '')
+                if rel_type == 'System.LinkTypes.Hierarchy-Forward':  # This indicates a child relationship
+                    child_url = relation.get('url', '')
+                    if child_url:
+                        try:
+                            child_id = int(child_url.split('/')[-1])
+                            child_ids.append(child_id)
+                        except (ValueError, IndexError):
+                            logger.warning(f"Could not parse child URL: {child_url}")
+            
+            if not child_ids:
+                return []
+            
+            # Fetch details for all children
+            children = self._fetch_work_items_details(child_ids)
+            logger.debug(f"Found {len(children)} direct children for work item {work_item_id}")
+            
+            return children
+            
+        except Exception as e:
+            logger.exception(f"Error getting direct children for work item {work_item_id}: {str(e)}")
+            return []
+
+    def _populate_parent_information_for_hierarchy(self, work_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Populate parent information for work items in hierarchy
+        
+        Args:
+            work_items: List of work items to process
+            
+        Returns:
+            List of work items with parent information populated
+        """
+        try:
+            logger.info("Populating parent information for hierarchy...")
+            
+            # Create a mapping of work item IDs to work items for quick lookup
+            work_item_map = {item['id']: item for item in work_items}
+            
+            for item in work_items:
+                parent_url = item.get('parent_url')
+                if parent_url:
+                    try:
+                        parent_id = int(parent_url.split('/')[-1])
+                        
+                        # Check if parent is in our current work items
+                        if parent_id in work_item_map:
+                            parent_item = work_item_map[parent_id]
+                            item['parent_type'] = parent_item.get('type', '')
+                            item['parent_id'] = parent_id
+                            item['parent_title'] = parent_item.get('title', '')
+                        else:
+                            # Fetch parent details from API
+                            parent_details = self._fetch_work_items_details([parent_id])
+                            if parent_details:
+                                parent = parent_details[0]
+                                item['parent_type'] = parent.get('type', '')
+                                item['parent_id'] = parent_id
+                                item['parent_title'] = parent.get('title', '')
+                    except (ValueError, IndexError):
+                        logger.warning(f"Could not parse parent URL: {parent_url}")
+                        item['parent_type'] = ''
+                        item['parent_id'] = ''
+                        item['parent_title'] = ''
+                else:
+                    item['parent_type'] = ''
+                    item['parent_id'] = ''
+                    item['parent_title'] = ''
+            
+            return work_items
+            
+        except Exception as e:
+            logger.exception(f"Error populating parent information: {str(e)}")
+            return work_items
+
+    def _aggregate_hours_from_descendants(self, work_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Aggregate hours from descendant work items to parent work items
+        
+        Args:
+            work_items: List of work items to process
+            
+        Returns:
+            List of work items with aggregated hours
+        """
+        try:
+            logger.info("Aggregating hours from descendants to parents...")
+            
+            # Create a mapping for quick lookups
+            work_item_map = {item['id']: item for item in work_items}
+            
+            # Create parent-child relationships
+            children_map = {}  # parent_id -> [child_ids]
+            for item in work_items:
+                parent_id = item.get('parent_id')
+                if parent_id and parent_id in work_item_map:
+                    if parent_id not in children_map:
+                        children_map[parent_id] = []
+                    children_map[parent_id].append(item['id'])
+            
+            # Function to recursively calculate aggregated hours
+            def calculate_aggregated_hours(work_item_id):
+                item = work_item_map[work_item_id]
                 
-                if descendant_ids:
+                # If this item has children, aggregate their hours
+                if work_item_id in children_map:
                     total_estimated = 0
                     total_completed = 0
                     total_remaining = 0
                     
-                    # Aggregate from all descendants
-                    for desc_id in descendant_ids:
-                        if desc_id in work_item_lookup:
-                            desc_item = work_item_lookup[desc_id]
-                            total_estimated += desc_item.get("estimated_hours", 0)
-                            total_completed += desc_item.get("completed_work", 0)
-                            total_remaining += desc_item.get("remaining_work", 0)
+                    for child_id in children_map[work_item_id]:
+                        child_estimated, child_completed, child_remaining = calculate_aggregated_hours(child_id)
+                        total_estimated += child_estimated
+                        total_completed += child_completed
+                        total_remaining += child_remaining
                     
-                    # Update the parent item with aggregated values
-                    item["estimated_hours"] = total_estimated
-                    item["completed_work"] = total_completed
-                    item["remaining_work"] = total_remaining
+                    # Update the parent with aggregated values
+                    item['estimated_hours'] = total_estimated
+                    item['completed_work'] = total_completed
+                    item['remaining_work'] = total_remaining
                     
                     # Recalculate percentage
                     if total_estimated > 0:
-                        item["percent_complete"] = total_completed / total_estimated
+                        item['percent_complete'] = total_completed / total_estimated
                     else:
-                        item["percent_complete"] = 0
+                        item['percent_complete'] = 0
                     
-                    logger.debug(f"Aggregated hours for {item_type} {item['id']}: "
-                               f"Est={total_estimated}, Comp={total_completed}, Rem={total_remaining}")
-
-    def calculate_capex_percentage(self, user_work_items: List[Dict[str, Any]], 
-                                 capex_epics: List[Dict[str, Any]]) -> float:
-        """
-        Calculate what percentage of user's work corresponds to CAPEX epics
-        """
-        if not user_work_items or not capex_epics:
-            return 0.0
-        
-        capex_epic_ids = {epic["id"] for epic in capex_epics}
-        
-        # Get all descendants of CAPEX epics
-        capex_descendants = self._get_all_descendant_work_items(list(capex_epic_ids))
-        all_capex_items = []
-        all_capex_items.extend(capex_descendants["epics"])
-        all_capex_items.extend(capex_descendants["features"])
-        all_capex_items.extend(capex_descendants["stories"])
-        all_capex_items.extend(capex_descendants["leaf_items"])
-        
-        capex_item_ids = {item["id"] for item in all_capex_items}
-        
-        # Calculate totals
-        total_estimated = sum(item.get("estimated_hours", 0) for item in user_work_items)
-        capex_estimated = sum(item.get("estimated_hours", 0) for item in user_work_items 
-                            if item["id"] in capex_item_ids)
-        
-        if total_estimated == 0:
-            return 0.0
-        
-        return capex_estimated / total_estimated
-
-    def _classify_work_items_as_capex(self, work_items: List[Dict[str, Any]], 
-                                    capex_epics: List[Dict[str, Any]]) -> None:
-        """
-        Classify work items as CAPEX or non-CAPEX based on whether they belong to CAPEX epics
-        """
-        if not capex_epics:
-            # If no CAPEX epics, all items are non-CAPEX
-            for item in work_items:
-                item["capex_classification"] = "non-CAPEX"
-            return
-        
-        capex_epic_ids = {epic["id"] for epic in capex_epics}
-        
-        # Get all descendants of CAPEX epics
-        capex_descendants = self._get_all_descendant_work_items(list(capex_epic_ids))
-        all_capex_items = []
-        all_capex_items.extend(capex_descendants["epics"])
-        all_capex_items.extend(capex_descendants["features"])
-        all_capex_items.extend(capex_descendants["stories"])
-        all_capex_items.extend(capex_descendants["leaf_items"])
-        
-        # Add the original CAPEX epics to the list
-        all_capex_items.extend(capex_epics)
-        
-        capex_item_ids = {item["id"] for item in all_capex_items}
-        
-        # Classify work items
-        for item in work_items:
-            if item["id"] in capex_item_ids:
-                item["capex_classification"] = "CAPEX"
-            else:
-                item["capex_classification"] = "non-CAPEX"
-
-    def traverse_hierarchy(self, epics: List[Dict[str, Any]], custom_field_filters: List[Dict[str, str]] = None) -> Dict[str, Any]:
-        """
-        Traverse the work item hierarchy starting from epics, including items that don't follow strict hierarchy
-        """
-        logger.info(f"Starting hierarchy traversal with {len(epics)} epics")
-        
-        epic_ids = [epic["id"] for epic in epics]
-        
-        # Get all descendants of these epics
-        descendants = self._get_all_descendant_work_items(epic_ids)
-        
-        # Add the original epics to the results
-        all_epics = epics + descendants["epics"]
-        
-        # Combine all work items for aggregation
-        all_work_items = all_epics + descendants["features"] + descendants["stories"] + descendants["leaf_items"]
-        
-        # Perform hour aggregation
-        self._aggregate_hours_from_descendants(all_work_items, all_work_items)
-        
-        logger.info(f"Hierarchy traversal complete:")
-        logger.info(f"  - {len(all_epics)} epics")
-        logger.info(f"  - {len(descendants['features'])} features")
-        logger.info(f"  - {len(descendants['stories'])} stories")
-        logger.info(f"  - {len(descendants['leaf_items'])} leaf items")
-        
-        return {
-            "epics": all_epics,
-            "features": descendants["features"],
-            "stories": descendants["stories"],
-            "leaf_items": descendants["leaf_items"]
-        }
-
-    def organize_user_work_items(self, user_work_items: List[Dict[str, Any]], 
-                               capex_epics: List[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """
-        Organize user work items by type, perform hour aggregation, and classify as CAPEX/non-CAPEX
-        """
-        # Classify work items as CAPEX or non-CAPEX
-        if capex_epics:
-            self._classify_work_items_as_capex(user_work_items, capex_epics)
-        else:
-            for item in user_work_items:
-                item["capex_classification"] = "non-CAPEX"
-        
-        epics = []
-        features = []
-        stories = []
-        leaf_items = []
-        
-        for item in user_work_items:
-            item_type = item.get("type", "").lower()
+                    return total_estimated, total_completed, total_remaining
+                else:
+                    # Leaf item, return its own values
+                    estimated = item.get('estimated_hours', 0) or 0
+                    completed = item.get('completed_work', 0) or 0
+                    remaining = item.get('remaining_work', 0) or 0
+                    return estimated, completed, remaining
             
-            if item_type == "epic":
-                epics.append(item)
-            elif item_type == "feature":
-                features.append(item)
-            elif item_type == "user story":
-                stories.append(item)
-            elif item_type in ["task", "bug", "qa validation task"]:
-                leaf_items.append(item)
-            else:
-                # Handle unknown types - add to leaf items
-                leaf_items.append(item)
+            # Calculate aggregated hours for all items
+            for item in work_items:
+                calculate_aggregated_hours(item['id'])
+            
+            return work_items
+            
+        except Exception as e:
+            logger.exception(f"Error aggregating hours: {str(e)}")
+            return work_items
+
+    def _fetch_work_items_details(self, work_item_ids: List[int]) -> List[Dict[str, Any]]:
+        """
+        Fetch detailed information for multiple work items
         
-        # Perform hour aggregation for user work items
-        all_user_items = epics + features + stories + leaf_items
-        self._aggregate_hours_from_descendants(all_user_items, all_user_items)
+        Args:
+            work_item_ids: List of work item IDs to fetch
+            
+        Returns:
+            List of work items with detailed information
+        """
+        try:
+            if not work_item_ids:
+                return []
+            
+            # Split into batches of 200 (Azure DevOps API limit)
+            batch_size = 200
+            all_work_items = []
+            
+            for i in range(0, len(work_item_ids), batch_size):
+                batch_ids = work_item_ids[i:i + batch_size]
+                ids_param = ','.join(map(str, batch_ids))
+                
+                url = f"{self.base_url}/workitems"
+                params = {
+                    'ids': ids_param,
+                    'api-version': '6.0',
+                    '$expand': 'relations'
+                }
+                
+                logger.debug(f"Fetching work items batch: {len(batch_ids)} items")
+                response = requests.get(url, headers=self.headers, params=params)
+                response.raise_for_status()
+                
+                batch_work_items = response.json().get('value', [])
+                processed_items = self._process_work_items(batch_work_items)
+                all_work_items.extend(processed_items)
+            
+            logger.info(f"Successfully fetched details for {len(all_work_items)} work items")
+            return all_work_items
+            
+        except Exception as e:
+            logger.exception(f"Error fetching work item details: {str(e)}")
+            raise
+
+    def _process_work_items(self, work_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Process raw work items from Azure DevOps API into standardized format
         
-        return {
-            "epics": epics,
-            "features": features,
-            "stories": stories,
-            "leaf_items": leaf_items
-        }
+        Args:
+            work_items: Raw work items from API
+            
+        Returns:
+            List of processed work items
+        """
+        try:
+            processed_items = []
+            
+            for item in work_items:
+                fields = item.get('fields', {})
+                relations = item.get('relations', [])
+                
+                # Extract parent URL from relations
+                parent_url = None
+                for relation in relations:
+                    if relation.get('rel') == 'System.LinkTypes.Hierarchy-Reverse':
+                        parent_url = relation.get('url')
+                        break
+                
+                # Get numeric values with proper handling
+                estimated_hours = self._get_numeric_value(fields.get('Microsoft.VSTS.Scheduling.OriginalEstimate'))
+                completed_work = self._get_numeric_value(fields.get('Microsoft.VSTS.Scheduling.CompletedWork'))
+                remaining_work = self._get_numeric_value(fields.get('Microsoft.VSTS.Scheduling.RemainingWork'))
+                
+                # Calculate percentage complete
+                percent_complete = 0
+                if estimated_hours and estimated_hours > 0:
+                    percent_complete = completed_work / estimated_hours
+                
+                processed_item = {
+                    'id': item.get('id'),
+                    'title': fields.get('System.Title', ''),
+                    'type': fields.get('System.WorkItemType', ''),
+                    'state': fields.get('System.State', ''),
+                    'assigned_to': self._extract_assigned_to(fields.get('System.AssignedTo')),
+                    'estimated_hours': estimated_hours,
+                    'completed_work': completed_work,
+                    'remaining_work': remaining_work,
+                    'percent_complete': percent_complete,
+                    'parent_url': parent_url,
+                    'work_item_type': fields.get('System.WorkItemType', ''),
+                    'original_fields': fields  # Keep original fields for custom field access
+                }
+                
+                processed_items.append(processed_item)
+            
+            return processed_items
+            
+        except Exception as e:
+            logger.exception(f"Error processing work items: {str(e)}")
+            raise
+
+    def _get_numeric_value(self, value: Any) -> float:
+        """
+        Safely convert a value to float, returning 0 if conversion fails
+        
+        Args:
+            value: Value to convert
+            
+        Returns:
+            Float value or 0 if conversion fails
+        """
+        if value is None:
+            return 0
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return 0
+
+    def _extract_assigned_to(self, assigned_to_field: Any) -> str:
+        """
+        Extract assigned to name from the field value
+        
+        Args:
+            assigned_to_field: Raw assigned to field from API
+            
+        Returns:
+            Clean assigned to name
+        """
+        if not assigned_to_field:
+            return ""
+        
+        if isinstance(assigned_to_field, dict):
+            return assigned_to_field.get('displayName', '')
+        elif isinstance(assigned_to_field, str):
+            return assigned_to_field
+        else:
+            return str(assigned_to_field)

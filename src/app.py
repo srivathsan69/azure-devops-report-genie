@@ -425,20 +425,31 @@ def generate_user_report():
                 "capex_percentage": 0.0
             }), 200
         
-        # Step 2: Calculate CAPEX percentage if CAPEX fields are provided
+        # Step 2: Calculate CAPEX percentage and add classification if CAPEX fields are provided
         capex_percentage = 0.0
+        capex_epic_ids = set()
+        
         if capex_fields:
             logger.info("Calculating CAPEX percentage...")
             # Find EPICs that match CAPEX fields
             capex_epics = azure_devops.fetch_epics(capex_fields, filter_date)
+            capex_epic_ids = {epic['id'] for epic in capex_epics}
             capex_percentage = azure_devops.calculate_capex_percentage(user_work_items, capex_epics)
             logger.info(f"CAPEX percentage calculated: {capex_percentage:.2%}")
         
-        # Step 3: Organize work items by type
+        # Step 3: Add CAPEX classification to work items
+        for work_item in user_work_items:
+            if capex_epic_ids:
+                is_capex = azure_devops._belongs_to_capex_epic(work_item, capex_epic_ids)
+                work_item['capex_classification'] = 'CAPEX' if is_capex else 'non-CAPEX'
+            else:
+                work_item['capex_classification'] = 'non-CAPEX'
+        
+        # Step 4: Organize work items by type (without rollup calculation)
         logger.info(f"Organizing {len(user_work_items)} work items by type...")
         organized_data = azure_devops.organize_user_work_items(user_work_items)
         
-        # Step 4: Generate Excel report
+        # Step 5: Generate Excel report
         logger.info("Generating user Excel report...")
         with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as temp_file:
             temp_file_path = temp_file.name
@@ -452,7 +463,7 @@ def generate_user_report():
             capex_percentage=capex_percentage
         )
         
-        # Step 5: Upload to Azure Blob Storage
+        # Step 6: Upload to Azure Blob Storage
         logger.info("Uploading user report to Azure Blob Storage...")
         timestamp = azure_devops.get_timestamp()
         
@@ -472,7 +483,8 @@ def generate_user_report():
         return jsonify({
             "message": f"User report generated successfully for {assigned_to}",
             "file_url": file_url,
-            "capex_percentage": capex_percentage
+            "capex_percentage": capex_percentage,
+            "capex_classification": "Work items are classified as CAPEX or non-CAPEX based on whether they belong to CAPEX epics"
         }), 200
         
     except Exception as e:
