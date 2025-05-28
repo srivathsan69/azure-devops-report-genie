@@ -324,4 +324,42 @@ class ReportService:
             worksheet.write(summary_row + 1, 0, "CAPEX %", cell_format)
             worksheet.write(summary_row + 1, 1, f"{capex_percentage:.2%} of total work corresponds to CAPEX fields", cell_format)
     
-    # ... keep existing code (all the _build_*_sheet methods remain the same)
+    def _build_epic_sheet(self, workbook, epics: List[Dict[str, Any]], header_format, cell_format, 
+                         percent_format, custom_field_names: List[str] = None, is_user_report: bool = False,
+                         capex_percentage: float = 0.0) -> None:
+        """Build the Epic sheet"""
+        columns_config = EPIC_COLUMNS_USER_REPORT if is_user_report else EPIC_COLUMNS
+        self._build_sheet_with_config(
+            workbook, "Epics", epics, columns_config, header_format, cell_format, 
+            percent_format, custom_field_names, is_user_report, capex_percentage
+        )
+    
+    def _build_feature_sheet(self, workbook, features: List[Dict[str, Any]], header_format, cell_format, 
+                            percent_format, is_user_report: bool = False, capex_percentage: float = 0.0) -> None:
+        """Build the Feature sheet"""
+        columns_config = FEATURE_COLUMNS_USER_REPORT if is_user_report else FEATURE_COLUMNS
+        self._build_sheet_with_config(
+            workbook, "Features", features, columns_config, header_format, cell_format, 
+            percent_format, None, is_user_report, capex_percentage
+        )
+    
+    def _build_story_sheet(self, workbook, stories: List[Dict[str, Any]], header_format, cell_format, 
+                          percent_format, is_user_report: bool = False, capex_percentage: float = 0.0) -> None:
+        """Build the User Story sheet"""
+        columns_config = STORY_COLUMNS_USER_REPORT if is_user_report else STORY_COLUMNS
+        self._build_sheet_with_config(
+            workbook, "User Stories", stories, columns_config, header_format, cell_format, 
+            percent_format, None, is_user_report, capex_percentage
+        )
+    
+    def _build_task_sheet(self, workbook, tasks: List[Dict[str, Any]], header_format, cell_format, 
+                         percent_format, is_user_report: bool = False, capex_percentage: float = 0.0) -> None:
+        """Build the Task/Bug/QA sheet"""
+        # Filter leaf items to include only tasks, bugs, and QA items
+        filtered_tasks = self._filter_work_items_by_type(tasks, ["Task", "Bug", "QA Defect", "QA Issue"])
+        
+        columns_config = TASK_COLUMNS_USER_REPORT if is_user_report else TASK_COLUMNS
+        self._build_sheet_with_config(
+            workbook, "Tasks", filtered_tasks, columns_config, header_format, cell_format, 
+            percent_format, None, is_user_report, capex_percentage
+        )
