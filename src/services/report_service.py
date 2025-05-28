@@ -191,16 +191,28 @@ class ReportService:
             
             # Build sheets based on the requested count
             if sheet_count >= 1:
-                self._build_epic_sheet(workbook, data["epics"], header_format, cell_format, percent_format, custom_field_names, is_user_report, capex_percentage, user_work_items)
+                # Filter out empty epics for display
+                epics_to_display = [epic for epic in data.get("epics", []) if epic.get('id')]
+                logger.info(f"Displaying {len(epics_to_display)} epics out of {len(data.get('epics', []))}")
+                self._build_epic_sheet(workbook, epics_to_display, header_format, cell_format, percent_format, custom_field_names, is_user_report, capex_percentage, user_work_items)
             
             if sheet_count >= 2:
-                self._build_feature_sheet(workbook, data["features"], header_format, cell_format, percent_format, is_user_report, capex_percentage, user_work_items)
+                # Filter out empty features for display
+                features_to_display = [feature for feature in data.get("features", []) if feature.get('id')]
+                logger.info(f"Displaying {len(features_to_display)} features out of {len(data.get('features', []))}")
+                self._build_feature_sheet(workbook, features_to_display, header_format, cell_format, percent_format, is_user_report, capex_percentage, user_work_items)
             
             if sheet_count >= 3:
-                self._build_story_sheet(workbook, data["stories"], header_format, cell_format, percent_format, is_user_report, capex_percentage, user_work_items)
+                # Filter out empty stories for display
+                stories_to_display = [story for story in data.get("stories", []) if story.get('id')]
+                logger.info(f"Displaying {len(stories_to_display)} stories out of {len(data.get('stories', []))}")
+                self._build_story_sheet(workbook, stories_to_display, header_format, cell_format, percent_format, is_user_report, capex_percentage, user_work_items)
             
             if sheet_count >= 4:
-                self._build_task_sheet(workbook, data["leaf_items"], header_format, cell_format, percent_format, is_user_report, capex_percentage, user_work_items)
+                # Filter out empty leaf items for display and ensure they are tasks/bugs/qa
+                leaf_items_to_display = [item for item in data.get("leaf_items", []) if item.get('id')]
+                logger.info(f"Displaying {len(leaf_items_to_display)} leaf items out of {len(data.get('leaf_items', []))}")
+                self._build_task_sheet(workbook, leaf_items_to_display, header_format, cell_format, percent_format, is_user_report, capex_percentage, user_work_items)
             
             # Close the workbook to save it
             workbook.close()

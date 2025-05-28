@@ -429,7 +429,7 @@ def generate_user_report():
             storage_account_sas
         )
         
-        # Step 1: Fetch user's work items
+        # Step 1: Fetch user's work items WITH parent information
         logger.info(f"Fetching work items assigned to {assigned_to}...")
         user_work_items = azure_devops.fetch_user_work_items(assigned_to, custom_fields, filter_date)
         
@@ -442,6 +442,10 @@ def generate_user_report():
             })
             response.headers['file_name'] = ""
             return response, 200
+        
+        # Step 1.5: Fetch parent details for user work items to populate parent fields
+        logger.info("Fetching parent details for user work items...")
+        azure_devops.populate_parent_details(user_work_items)
         
         # Step 2: Calculate CAPEX percentage and add classification if CAPEX fields are provided
         capex_percentage = 0.0
