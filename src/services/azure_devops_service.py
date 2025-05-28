@@ -1,4 +1,3 @@
-
 import requests
 import logging
 import json
@@ -234,50 +233,33 @@ class AzureDevOpsService:
 
     def organize_user_work_items(self, work_items: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
         """
-        Organize user work items by type without rollup calculation, but with parent information and CAPEX classification
-        
-        Args:
-            work_items: List of work items to organize
-            
-        Returns:
-            Dictionary with work items organized by type
+        Organize user work items by type without rollup calculations.
+        This shows individual work item hours, not aggregated values.
         """
-        try:
-            logger.info(f"Organizing {len(work_items)} user work items by type...")
+        logger.info(f"Organizing {len(work_items)} user work items by type...")
+        
+        organized = {
+            "epics": [],
+            "features": [],
+            "stories": [],
+            "leaf_items": []
+        }
+        
+        for item in work_items:
+            work_item_type = item.get("type", "").strip().lower()
             
-            # First, populate parent information for all work items
-            work_items_with_parents = self._populate_parent_information(work_items)
-            
-            # Organize by type
-            organized = {
-                "epics": [],
-                "features": [],
-                "stories": [],
-                "leaf_items": []
-            }
-            
-            for item in work_items_with_parents:
-                work_item_type = item.get("type", "").strip()
-                
-                if work_item_type.lower() == "epic":
-                    organized["epics"].append(item)
-                elif work_item_type.lower() == "feature":
-                    organized["features"].append(item)
-                elif work_item_type.lower() == "user story":
-                    organized["stories"].append(item)
-                elif work_item_type.lower() in ["task", "bug", "qa validation task"]:
-                    organized["leaf_items"].append(item)
-                else:
-                    # Default to leaf_items for unknown types
-                    organized["leaf_items"].append(item)
-            
-            logger.info(f"Organized work items: {len(organized['epics'])} epics, {len(organized['features'])} features, {len(organized['stories'])} stories, {len(organized['leaf_items'])} tasks/bugs/qa")
-            
-            return organized
-            
-        except Exception as e:
-            logger.exception(f"Error organizing user work items: {str(e)}")
-            raise
+            if work_item_type == "epic":
+                organized["epics"].append(item)
+            elif work_item_type == "feature":
+                organized["features"].append(item)
+            elif work_item_type in ["user story", "story"]:
+                organized["stories"].append(item)
+            else:
+                # Tasks, Bugs, QA items, etc.
+                organized["leaf_items"].append(item)
+        
+        logger.info(f"Organized work items: {len(organized['epics'])} epics, {len(organized['features'])} features, {len(organized['stories'])} stories, {len(organized['leaf_items'])} tasks/bugs/qa")
+        return organized
 
     def _populate_parent_information(self, work_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -330,8 +312,6 @@ class AzureDevOpsService:
         except Exception as e:
             logger.exception(f"Error populating parent information: {str(e)}")
             return work_items
-
-    # ... keep existing code (all other methods remain the same)
 
     def traverse_hierarchy(self, epics: List[Dict[str, Any]], custom_fields: List[Dict[str, str]] = None) -> Dict[str, List[Dict[str, Any]]]:
         """

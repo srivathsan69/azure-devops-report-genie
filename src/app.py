@@ -311,13 +311,15 @@ def generate_report():
         
         if not epics:
             logger.warning("No Epics found matching the criteria")
-            return jsonify({
+            response = jsonify({
                 "message": "No Epics found matching the criteria.",
                 "file_url": None
-            }), 200
+            })
+            response.headers['file_name'] = ""
+            return response, 200
         
-        # Step 2: Process work item hierarchy and roll up data
-        logger.info(f"Processing {len(epics)} Epics and their hierarchies...")
+        # Step 2: Process work item hierarchy and roll up data (FOR GENERAL REPORT)
+        logger.info(f"Processing {len(epics)} Epics and their hierarchies with rollup calculation...")
         processed_data = azure_devops.traverse_hierarchy(epics, custom_fields)
         
         # Step 3: Generate Excel report
@@ -350,10 +352,12 @@ def generate_report():
         os.unlink(temp_file_path)
         
         logger.info("Report generation completed successfully")
-        return jsonify({
+        response = jsonify({
             "message": "Report generated successfully",
             "file_url": file_url
-        }), 200
+        })
+        response.headers['file_name'] = blob_name
+        return response, 200
         
     except Exception as e:
         logger.exception("Error generating report")
@@ -363,7 +367,9 @@ def generate_report():
             "type": type(e).__name__,
             "traceback": traceback.format_exc()
         }
-        return jsonify(error_details), 500
+        response = jsonify(error_details)
+        response.headers['file_name'] = ""
+        return response, 500
 
 def generate_user_report():
     """Implementation of the user-specific report generation endpoint"""
@@ -419,11 +425,13 @@ def generate_user_report():
         
         if not user_work_items:
             logger.warning(f"No work items found assigned to {assigned_to}")
-            return jsonify({
+            response = jsonify({
                 "message": f"No work items found assigned to {assigned_to}.",
                 "file_url": None,
                 "capex_percentage": 0.0
-            }), 200
+            })
+            response.headers['file_name'] = ""
+            return response, 200
         
         # Step 2: Calculate CAPEX percentage and add classification if CAPEX fields are provided
         capex_percentage = 0.0
@@ -445,7 +453,7 @@ def generate_user_report():
             else:
                 work_item['capex_classification'] = 'non-CAPEX'
         
-        # Step 4: Organize work items by type (without rollup calculation)
+        # Step 4: Organize work items by type (WITHOUT rollup calculation for user report)
         logger.info(f"Organizing {len(user_work_items)} work items by type...")
         organized_data = azure_devops.organize_user_work_items(user_work_items)
         
@@ -480,12 +488,14 @@ def generate_user_report():
         os.unlink(temp_file_path)
         
         logger.info("User report generation completed successfully")
-        return jsonify({
+        response = jsonify({
             "message": f"User report generated successfully for {assigned_to}",
             "file_url": file_url,
             "capex_percentage": capex_percentage,
             "capex_classification": "Work items are classified as CAPEX or non-CAPEX based on whether they belong to CAPEX epics"
-        }), 200
+        })
+        response.headers['file_name'] = blob_name
+        return response, 200
         
     except Exception as e:
         logger.exception("Error generating user report")
@@ -494,7 +504,9 @@ def generate_user_report():
             "type": type(e).__name__,
             "traceback": traceback.format_exc()
         }
-        return jsonify(error_details), 500
+        response = jsonify(error_details)
+        response.headers['file_name'] = ""
+        return response, 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
