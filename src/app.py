@@ -1,3 +1,4 @@
+
 from flask import Flask, request, jsonify
 import logging
 import os
@@ -130,6 +131,10 @@ def generate_report_api():
             file_url:
               type: string
               description: URL to the generated report
+        headers:
+          file_name:
+            type: string
+            description: The filename of the generated report
       400:
         description: Bad request - missing required parameters
       500:
@@ -230,6 +235,10 @@ def generate_user_report_api():
             capex_classification:
               type: string
               description: Work items are classified as CAPEX or non-CAPEX based on whether they belong to CAPEX epics
+        headers:
+          file_name:
+            type: string
+            description: The filename of the generated report
       400:
         description: Bad request - missing required parameters
       500:
@@ -331,7 +340,8 @@ def generate_report():
             processed_data, 
             temp_file_path, 
             sheet_count,
-            custom_fields
+            custom_fields,
+            is_user_report=False  # This is the general report WITH rollup
         )
         
         # Step 4: Upload to Azure Blob Storage
@@ -468,7 +478,8 @@ def generate_user_report():
             sheet_count,
             custom_fields,
             is_user_report=True,
-            capex_percentage=capex_percentage
+            capex_percentage=capex_percentage,
+            user_work_items=user_work_items  # Pass the original work items for CAPEX calculation
         )
         
         # Step 6: Upload to Azure Blob Storage
