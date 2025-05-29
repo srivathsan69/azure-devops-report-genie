@@ -565,3 +565,87 @@ class AzureDevOpsService:
             "stories": stories,
             "leaf_items": leaf_items
         }
+    
+    def _belongs_to_capex_epic(self, work_item: Dict[str, Any], capex_epic_ids: Set[int]) -> bool:
+        """
+        Check if a work item belongs to any of the CAPEX epics
+        This method checks if the work item is directly a CAPEX epic or is a descendant of one
+        """
+        work_item_id = work_item.get("id")
+        
+        # Direct check: if this work item is itself a CAPEX epic
+        if work_item_id in capex_epic_ids:
+            return True
+        
+        # Check if this work item is a descendant of any CAPEX epic
+        # We need to traverse up the hierarchy to find if any parent is a CAPEX epic
+        try:
+            # Get the parent chain for this work item
+            parent_ids = self._get_parent_chain(work_item_id)
+            
+            # Check if any parent is in the CAPEX epic IDs
+            for parent_id in parent_ids:
+                if parent_id in capex_epic_ids:
+                    return True
+                    
+        except Exception as e:
+            logger.debug(f"Error checking parent chain for work item {work_item_id}: {str(e)}")
+            # Fallback: if we can't determine hierarchy, assume non-CAPEX
+            return False
+        
+        return False
+
+    def _get_parent_chain(self, work_item_id: int) -> List[int]:
+        """
+        Get the chain of parent IDs for a given work item
+        Returns list of parent IDs from immediate parent to root
+        """
+        parent_chain = []
+        current_id = work_item_id
+        processed_ids = set()  # Prevent infinite loops
+        
+        while current_id and current_id not in processed_ids:
+            processed_ids.add(current_id)
+            
+            try:
+                # Use WIQL to find parent work item
+                wiql = {
+                    "query": f"""
+                    SELECT [System.Id] 
+                    FROM WorkItemLinks 
+                    WHERE ([Target].[System.Id] = {current_id}) 
+                    AND ([System.Links.LinkType] = 'System.LinkTypes.Hierarchy-Forward')
+                    """
+                }
+                
+                response = requests.post(
+                    f"{self.base_url}/wit/wiql?api-version={self.api_version}",
+                    headers=self.headers,
+                    json=wiql
+                )
+                
+                if not response.ok:
+                    break
+                    
+                data = response.json()
+                work_item_relations = data.get("workItemRelations", [])
+                
+                # Find the parent (source) of the current work item
+                parent_id = None
+                for relation in work_item_relations:
+                    source = relation.get("source")
+                    if source and source.get("id"):
+                        parent_id = source["id"]
+                        break
+                
+                if parent_id and parent_id != current_id:
+                    parent_chain.append(parent_id)
+                    current_id = parent_id
+                else:
+                    break
+                    
+            except Exception as e:
+                logger.debug(f"Error getting parent for work item {current_id}: {str(e)}")
+                break
+        
+        return parent_chain
