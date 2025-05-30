@@ -1,4 +1,3 @@
-
 import requests
 import base64
 import json
@@ -131,8 +130,8 @@ class AzureDevOpsService:
             
             logger.info(f"Found {len(work_item_ids)} work items assigned to {assigned_to}")
             
-            # Fetch detailed work item data for the IDs
-            user_work_items = self._get_work_items_details(work_item_ids)
+            # Fetch detailed work item data for the IDs with parent information
+            user_work_items = self._get_work_items_details_with_parents(work_item_ids)
             
             return user_work_items
             
@@ -198,6 +197,84 @@ class AzureDevOpsService:
                 
         return filtered_items
     
+    def _get_work_items_details_with_parents(self, work_item_ids: List[int]) -> List[Dict[str, Any]]:
+        """
+        Get detailed information for multiple work items including parent information
+        """
+        # First get the basic work item details
+        work_items = self._get_work_items_details(work_item_ids)
+        
+        # Now populate parent information for each work item
+        for work_item in work_items:
+            parent_info = self._get_parent_work_item_info(work_item["id"])
+            work_item.update(parent_info)
+        
+        return work_items
+    
+    def _get_parent_work_item_info(self, work_item_id: int) -> Dict[str, str]:
+        """
+        Get parent work item information for a given work item ID
+        Returns dict with parent_id, parent_type, and parent_title
+        """
+        try:
+            # Use WIQL to find parent work item using hierarchy links
+            wiql = {
+                "query": f"""
+                SELECT [System.Id] 
+                FROM WorkItemLinks 
+                WHERE ([Target].[System.Id] = {work_item_id}) 
+                AND ([System.Links.LinkType] = 'System.LinkTypes.Hierarchy-Forward')
+                """
+            }
+            
+            logger.debug(f"Getting parent info for work item {work_item_id}")
+            
+            response = requests.post(
+                f"{self.base_url}/wit/wiql?api-version={self.api_version}",
+                headers=self.headers,
+                json=wiql
+            )
+            
+            if not response.ok:
+                logger.debug(f"Failed to get parent info for work item {work_item_id}: {response.status_code}")
+                return {"parent_id": "", "parent_type": "", "parent_title": ""}
+            
+            data = response.json()
+            work_item_relations = data.get("workItemRelations", [])
+            
+            # Find the parent (source) of the current work item
+            parent_id = None
+            for relation in work_item_relations:
+                source = relation.get("source")
+                if source and source.get("id"):
+                    parent_id = source["id"]
+                    break
+            
+            if not parent_id:
+                logger.debug(f"No parent found for work item {work_item_id}")
+                return {"parent_id": "", "parent_type": "", "parent_title": ""}
+            
+            # Get detailed information about the parent work item
+            parent_details = self._get_work_items_details([parent_id])
+            
+            if parent_details:
+                parent = parent_details[0]
+                return {
+                    "parent_id": str(parent_id),
+                    "parent_type": parent.get("type", ""),
+                    "parent_title": parent.get("title", "")
+                }
+            else:
+                logger.debug(f"Failed to get parent details for parent ID {parent_id}")
+                return {"parent_id": str(parent_id), "parent_type": "", "parent_title": ""}
+                
+        except requests.exceptions.RequestException as e:
+            logger.debug(f"Error getting parent info for work item {work_item_id}: {str(e)}")
+            return {"parent_id": "", "parent_type": "", "parent_title": ""}
+        except Exception as e:
+            logger.debug(f"Unexpected error getting parent info for work item {work_item_id}: {str(e)}")
+            return {"parent_id": "", "parent_type": "", "parent_title": ""}
+    
     def _get_work_items_details(self, work_item_ids: List[int]) -> List[Dict[str, Any]]:
         """
         Get detailed information for multiple work items
@@ -259,7 +336,7 @@ class AzureDevOpsService:
             "assigned_to": fields.get("System.AssignedTo", {}).get("displayName", "") if isinstance(fields.get("System.AssignedTo"), dict) else fields.get("System.AssignedTo", ""),
             # Store the original fields for reference in filtering
             "original_fields": fields,
-            # Initialize parent info
+            # Initialize parent info - will be populated by _get_parent_work_item_info if needed
             "parent_type": "",
             "parent_id": "",
             "parent_title": ""
