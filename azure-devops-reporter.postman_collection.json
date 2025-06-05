@@ -3,7 +3,7 @@
 	"info": {
 		"_postman_id": "7a8b9c0d-1e2f-3a4b-5c6d-7e8f9a0b1c2d",
 		"name": "Azure DevOps Reporter API",
-		"description": "Collection for testing the Azure DevOps Work Item Reporter API",
+		"description": "Collection for testing the Azure DevOps Work Item Reporter API with enhanced date filtering",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
 	},
 	"item": [
@@ -26,7 +26,7 @@
 			"response": []
 		},
 		{
-			"name": "Generate Report",
+			"name": "Generate Report - Basic",
 			"request": {
 				"method": "POST",
 				"header": [
@@ -37,7 +37,7 @@
 				],
 				"body": {
 					"mode": "raw",
-					"raw": "{\n  \"AZURE_PAT\": \"{{azure_pat}}\",\n  \"ORGANIZATION\": \"{{organization}}\",\n  \"PROJECT\": \"{{project}}\",\n  \"CUSTOM_FIELDS\": [\"Custom.BusinessValue\", \"Custom.Priority\"],\n  \"SHEET_COUNT\": 4,\n  \"storage_account_name\": \"{{storage_account_name}}\",\n  \"container_name\": \"{{container_name}}\",\n  \"storage_account_sas\": \"{{storage_account_sas}}\"\n}",
+					"raw": "{\n  \"AZURE_PAT\": \"{{azure_pat}}\",\n  \"ORGANIZATION\": \"{{organization}}\",\n  \"PROJECT\": \"{{project}}\",\n  \"CUSTOM_FIELDS\": [\n    {\n      \"key\": \"Custom.BusinessValue\",\n      \"value\": \"High\"\n    }\n  ],\n  \"SHEET_COUNT\": 4,\n  \"storage_account_name\": \"{{storage_account_name}}\",\n  \"container_name\": \"{{container_name}}\",\n  \"storage_account_sas\": \"{{storage_account_sas}}\"\n}",
 					"options": {
 						"raw": {
 							"language": "json"
@@ -45,16 +45,148 @@
 					}
 				},
 				"url": {
-					"raw": "{{base_url}}/api/generate-report",
+					"raw": "{{base_url}}/ado-report/generate-report",
 					"host": [
 						"{{base_url}}"
 					],
 					"path": [
-						"api",
+						"ado-report",
 						"generate-report"
 					]
 				},
-				"description": "Generate an Azure DevOps work item report and upload it to Azure Blob Storage"
+				"description": "Generate a basic Azure DevOps work item report"
+			},
+			"response": []
+		},
+		{
+			"name": "Generate Report - With Date Range Filter",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"AZURE_PAT\": \"{{azure_pat}}\",\n  \"ORGANIZATION\": \"{{organization}}\",\n  \"PROJECT\": \"{{project}}\",\n  \"CUSTOM_FIELDS\": [\n    {\n      \"key\": \"Custom.BusinessValue\",\n      \"value\": \"High\"\n    }\n  ],\n  \"filter_startdate\": \"2024-01-01\",\n  \"filter_enddate\": \"2024-12-31\",\n  \"SHEET_COUNT\": 4,\n  \"storage_account_name\": \"{{storage_account_name}}\",\n  \"container_name\": \"{{container_name}}\",\n  \"storage_account_sas\": \"{{storage_account_sas}}\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/ado-report/generate-report",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"ado-report",
+						"generate-report"
+					]
+				},
+				"description": "Generate report with date range filtering (2024 work items only)"
+			},
+			"response": []
+		},
+		{
+			"name": "Generate Report - Selective Work Item Type Filtering",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"AZURE_PAT\": \"{{azure_pat}}\",\n  \"ORGANIZATION\": \"{{organization}}\",\n  \"PROJECT\": \"{{project}}\",\n  \"CUSTOM_FIELDS\": [\n    {\n      \"key\": \"Custom.BusinessValue\",\n      \"value\": \"High\"\n    }\n  ],\n  \"filter_startdate\": \"2024-01-01\",\n  \"filter_workitemtype\": [\"Epic\", \"Task\"],\n  \"SHEET_COUNT\": 4,\n  \"storage_account_name\": \"{{storage_account_name}}\",\n  \"container_name\": \"{{container_name}}\",\n  \"storage_account_sas\": \"{{storage_account_sas}}\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/ado-report/generate-report",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"ado-report",
+						"generate-report"
+					]
+				},
+				"description": "Generate report filtering only Epics and Tasks created after 2024-01-01"
+			},
+			"response": []
+		},
+		{
+			"name": "User Report - Basic",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"AZURE_PAT\": \"{{azure_pat}}\",\n  \"ORGANIZATION\": \"{{organization}}\",\n  \"PROJECT\": \"{{project}}\",\n  \"ASSIGNEDTO\": \"{{user_email}}\",\n  \"CUSTOM_FIELDS\": [\n    {\n      \"key\": \"Custom.Team\",\n      \"value\": \"Development\"\n    }\n  ],\n  \"CAPEX_FIELDS\": [\n    {\n      \"key\": \"Custom.Business_Value\",\n      \"value\": \"High\"\n    }\n  ],\n  \"SHEET_COUNT\": 4,\n  \"storage_account_name\": \"{{storage_account_name}}\",\n  \"container_name\": \"{{container_name}}\",\n  \"storage_account_sas\": \"{{storage_account_sas}}\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/ado-report/user-report",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"ado-report",
+						"user-report"
+					]
+				},
+				"description": "Generate a basic user-specific report with CAPEX analysis"
+			},
+			"response": []
+		},
+		{
+			"name": "User Report - With Enhanced Date Filtering",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"AZURE_PAT\": \"{{azure_pat}}\",\n  \"ORGANIZATION\": \"{{organization}}\",\n  \"PROJECT\": \"{{project}}\",\n  \"ASSIGNEDTO\": \"{{user_email}}\",\n  \"CUSTOM_FIELDS\": [\n    {\n      \"key\": \"Custom.Team\",\n      \"value\": \"Development\"\n    }\n  ],\n  \"CAPEX_FIELDS\": [\n    {\n      \"key\": \"Custom.Business_Value\",\n      \"value\": \"High\"\n    }\n  ],\n  \"filter_startdate\": \"2024-01-01\",\n  \"filter_enddate\": \"2024-12-31\",\n  \"filter_workitemtype\": [\"User Story\", \"Task\", \"Bug\"],\n  \"SHEET_COUNT\": 4,\n  \"storage_account_name\": \"{{storage_account_name}}\",\n  \"container_name\": \"{{container_name}}\",\n  \"storage_account_sas\": \"{{storage_account_sas}}\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/ado-report/user-report",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"ado-report",
+						"user-report"
+					]
+				},
+				"description": "Generate user report with date range and selective work item type filtering"
 			},
 			"response": []
 		}
@@ -79,6 +211,11 @@
 		{
 			"key": "project",
 			"value": "your-azure-devops-project",
+			"type": "string"
+		},
+		{
+			"key": "user_email",
+			"value": "user@example.com",
 			"type": "string"
 		},
 		{

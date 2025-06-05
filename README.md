@@ -8,11 +8,12 @@ A Flask-based API service for generating comprehensive Excel reports from Azure 
 ### General Report Generation (`/ado-report/generate-report`)
 - Fetch and process Epic work items and their complete hierarchy
 - Support for custom field filtering
+- **Enhanced date filtering with selective work item type filtering**
 - Flexible hierarchy support (handles non-standard parent-child relationships)
 - Automatic hour aggregation from child to parent work items
 - Multi-sheet Excel output (Epic, Feature, User Story, Task/Bug/QA sheets)
 - Parent information tracking (Parent Type, Parent ID, Parent Title)
-- Date-based filtering
+- Date range filtering with start and end dates
 - Azure Blob Storage integration
 
 ### User-Specific Reports (`/ado-report/user-report`)
@@ -20,6 +21,7 @@ A Flask-based API service for generating comprehensive Excel reports from Azure 
 - CAPEX percentage calculation based on configurable CAPEX fields
 - Work item classification as CAPEX or non-CAPEX
 - Complete parent information and hour aggregation
+- **Enhanced date filtering with selective work item type filtering**
 - Summary totals with CAPEX breakdown
 - Same multi-sheet Excel format as general reports
 
@@ -43,6 +45,9 @@ Generates a comprehensive report of Epic work items and their complete hierarchy
     }
   ],
   "filter_date": "2024-01-01",
+  "filter_startdate": "2024-01-01",
+  "filter_enddate": "2024-12-31",
+  "filter_workitemtype": ["Epic", "Task"],
   "output_file_name": "my_report",
   "SHEET_COUNT": 4,
   "storage_account_name": "your_storage_account",
@@ -80,6 +85,9 @@ Generates a user-specific report with CAPEX analysis.
     }
   ],
   "filter_date": "2024-01-01",
+  "filter_startdate": "2024-01-01",
+  "filter_enddate": "2024-12-31",
+  "filter_workitemtype": ["Epic", "User Story", "Task"],
   "output_file_name": "user_report",
   "SHEET_COUNT": 4,
   "storage_account_name": "your_storage_account",
@@ -87,6 +95,53 @@ Generates a user-specific report with CAPEX analysis.
   "storage_account_sas": "your_sas_token"
 }
 ```
+
+## Enhanced Date Filtering
+
+### New Parameters
+
+- **`filter_startdate`** (string, optional): Start date in YYYY-MM-DD format. Filters work items created on or after this date.
+- **`filter_enddate`** (string, optional): End date in YYYY-MM-DD format. Filters work items created on or before this date.
+- **`filter_workitemtype`** (array, optional): List of work item types to apply date filtering to. Valid types: `["Epic", "Feature", "User Story", "Task", "Bug", "QA Validation Task"]`
+- **`filter_date`** (string, optional): **DEPRECATED** - Use `filter_startdate` instead. Maintained for backward compatibility.
+
+### Date Filtering Examples
+
+#### Filter all work items created after a specific date:
+```json
+{
+  "filter_startdate": "2024-01-01"
+}
+```
+
+#### Filter work items within a date range:
+```json
+{
+  "filter_startdate": "2024-01-01",
+  "filter_enddate": "2024-12-31"
+}
+```
+
+#### Filter only specific work item types by date:
+```json
+{
+  "filter_startdate": "2024-01-01",
+  "filter_workitemtype": ["Epic", "Task"]
+}
+```
+
+#### Filter all work items (no type restriction):
+```json
+{
+  "filter_startdate": "2024-01-01"
+}
+```
+
+### How Date Filtering Works
+
+1. **No `filter_workitemtype` specified**: Date filter applies to ALL work item types
+2. **`filter_workitemtype` specified**: Date filter applies ONLY to the specified work item types
+3. **Backward compatibility**: `filter_date` parameter still works and is treated as `filter_startdate`
 
 ## Excel Report Structure
 
