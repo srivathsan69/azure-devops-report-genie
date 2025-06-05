@@ -102,7 +102,18 @@ def generate_report_api():
                     description: Custom field value for filtering
             filter_date:
               type: string
-              description: Optional date string (YYYY-MM-DD) to filter work items created on or after this date
+              description: DEPRECATED - Use filter_startdate and filter_enddate instead. Optional date string (YYYY-MM-DD) to filter work items created on or after this date
+            filter_startdate:
+              type: string
+              description: Optional start date string (YYYY-MM-DD) to filter work items created on or after this date
+            filter_enddate:
+              type: string
+              description: Optional end date string (YYYY-MM-DD) to filter work items created on or before this date
+            filter_workitemtype:
+              type: array
+              description: List of work item types to apply date filtering to (e.g., ["Epic", "Task"]). If not provided, date filter applies to all types.
+              items:
+                type: string
             output_file_name:
               type: string
               description: Optional custom filename for the output report (without extension)
@@ -200,7 +211,18 @@ def generate_user_report_api():
                     description: Custom field value for CAPEX filtering
             filter_date:
               type: string
-              description: Optional date string (YYYY-MM-DD) to filter work items created on or after this date
+              description: DEPRECATED - Use filter_startdate and filter_enddate instead. Optional date string (YYYY-MM-DD) to filter work items created on or after this date
+            filter_startdate:
+              type: string
+              description: Optional start date string (YYYY-MM-DD) to filter work items created on or after this date
+            filter_enddate:
+              type: string
+              description: Optional end date string (YYYY-MM-DD) to filter work items created on or before this date
+            filter_workitemtype:
+              type: array
+              description: List of work item types to apply date filtering to (e.g., ["Epic", "Task"]). If not provided, date filter applies to all types.
+              items:
+                type: string
             output_file_name:
               type: string
               description: Optional custom filename for the output report (without extension)
@@ -255,6 +277,48 @@ def legacy_generate_report():
     """Legacy endpoint that redirects to the new path"""
     return generate_report()
 
+def _validate_date_parameters(data: dict) -> tuple:
+    """
+    Validate and process date parameters with backward compatibility
+    
+    Returns:
+        tuple: (filter_startdate, filter_enddate, filter_workitemtype, error_message)
+    """
+    filter_startdate = data.get('filter_startdate')
+    filter_enddate = data.get('filter_enddate')
+    filter_workitemtype = data.get('filter_workitemtype', [])
+    legacy_filter_date = data.get('filter_date')
+    
+    # Handle backward compatibility with legacy filter_date
+    if legacy_filter_date and not filter_startdate:
+        logger.info("Using legacy filter_date parameter as filter_startdate")
+        filter_startdate = legacy_filter_date
+    
+    # Validate date formats
+    try:
+        if filter_startdate:
+            datetime.strptime(filter_startdate, '%Y-%m-%d')
+        if filter_enddate:
+            datetime.strptime(filter_enddate, '%Y-%m-%d')
+    except ValueError:
+        return None, None, None, "Invalid date format. Please use YYYY-MM-DD format."
+    
+    # Validate date range
+    if filter_startdate and filter_enddate:
+        start_date = datetime.strptime(filter_startdate, '%Y-%m-%d')
+        end_date = datetime.strptime(filter_enddate, '%Y-%m-%d')
+        if start_date > end_date:
+            return None, None, None, "filter_startdate must be before or equal to filter_enddate."
+    
+    # Validate work item types
+    valid_work_item_types = ["Epic", "Feature", "User Story", "Task", "Bug", "QA Validation Task"]
+    if filter_workitemtype:
+        invalid_types = [wit for wit in filter_workitemtype if wit not in valid_work_item_types]
+        if invalid_types:
+            return None, None, None, f"Invalid work item types: {invalid_types}. Valid types are: {valid_work_item_types}"
+    
+    return filter_startdate, filter_enddate, filter_workitemtype, None
+
 def generate_report():
     """Shared implementation of the report generation endpoint"""
     try:
@@ -271,8 +335,13 @@ def generate_report():
         # Optional parameters
         custom_fields = data.get('CUSTOM_FIELDS', [])
         sheet_count = int(data.get('SHEET_COUNT', 4))
-        filter_date = data.get('filter_date')
         output_file_name = data.get('output_file_name')
+        
+        # Enhanced date filtering parameters
+        filter_startdate, filter_enddate, filter_workitemtype, date_error = _validate_date_parameters(data)
+        if date_error:
+            logger.error(f"Date validation error: {date_error}")
+            return jsonify({"error": date_error}), 400
         
         # Storage account parameters
         storage_account_name = data.get('storage_account_name')
@@ -297,16 +366,6 @@ def generate_report():
             return jsonify({
                 "error": "SHEET_COUNT must be between 1 and 4."
             }), 400
-            
-        # Validate date format if provided
-        if filter_date:
-            try:
-                datetime.strptime(filter_date, '%Y-%m-%d')
-            except ValueError:
-                logger.error(f"Invalid date format: {filter_date}")
-                return jsonify({
-                    "error": "Invalid filter_date format. Please use YYYY-MM-DD format."
-                }), 400
 
         # Initialize services
         logger.info("Initializing services")
@@ -318,9 +377,9 @@ def generate_report():
             storage_account_sas
         )
         
-        # Step 1: Fetch Epics from Azure DevOps using the custom field filters and date filter
+        # Step 1: Fetch Epics from Azure DevOps using the enhanced filtering
         logger.info("Fetching Epics from Azure DevOps...")
-        epics = azure_devops.fetch_epics(custom_fields, filter_date)
+        epics = azure_devops.fetch_epics(custom_fields, filter_startdate, filter_enddate, filter_workitemtype)
         
         if not epics:
             logger.warning("No Epics found matching the criteria")
@@ -405,8 +464,13 @@ def generate_user_report():
         custom_fields = data.get('CUSTOM_FIELDS', [])
         capex_fields = data.get('CAPEX_FIELDS', [])
         sheet_count = int(data.get('SHEET_COUNT', 4))
-        filter_date = data.get('filter_date')
         output_file_name = data.get('output_file_name')
+        
+        # Enhanced date filtering parameters
+        filter_startdate, filter_enddate, filter_workitemtype, date_error = _validate_date_parameters(data)
+        if date_error:
+            logger.error(f"Date validation error: {date_error}")
+            return jsonify({"error": date_error}), 400
         
         # Storage account parameters
         storage_account_name = data.get('storage_account_name')
@@ -436,9 +500,9 @@ def generate_user_report():
             storage_account_sas
         )
         
-        # Step 1: Fetch user's work items
+        # Step 1: Fetch user's work items with enhanced filtering
         logger.info(f"Fetching work items assigned to {assigned_to}...")
-        user_work_items = azure_devops.fetch_user_work_items(assigned_to, custom_fields, filter_date)
+        user_work_items = azure_devops.fetch_user_work_items(assigned_to, custom_fields, None, filter_startdate, filter_enddate, filter_workitemtype)
         
         if not user_work_items:
             logger.warning(f"No work items found assigned to {assigned_to}")
@@ -457,8 +521,8 @@ def generate_user_report():
 
         if capex_fields:
             logger.info("Calculating CAPEX percentage...")
-            # Find EPICs that match CAPEX fields
-            capex_epics = azure_devops.fetch_epics(capex_fields, filter_date)
+            # Find EPICs that match CAPEX fields using enhanced filtering
+            capex_epics = azure_devops.fetch_epics(capex_fields, filter_startdate, filter_enddate, filter_workitemtype)
             capex_epic_ids = {epic['id'] for epic in capex_epics}
             capex_percentage = azure_devops.calculate_capex_percentage(user_work_items, capex_epics)
             logger.info(f"CAPEX percentage calculated: {capex_percentage:.2%}")
@@ -527,19 +591,9 @@ def generate_user_report():
         }
         response = jsonify(error_details)
         response.headers['file_name'] = ""
-        return response, 500 
-        
-    except Exception as e:
-        logger.exception("Error generating user report")
-        error_details = {
-            "error": f"Failed to generate user report: {str(e)}",
-            "type": type(e).__name__,
-            "traceback": traceback.format_exc()
-        }
-        response = jsonify(error_details)
-        response.headers['file_name'] = ""
         return response, 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
+

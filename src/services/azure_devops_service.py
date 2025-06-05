@@ -27,25 +27,72 @@ class AzureDevOpsService:
         """Get current timestamp formatted for filenames"""
         return datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    def fetch_epics(self, custom_field_filters: List[Dict[str, str]] = None, filter_date: str = None) -> List[Dict[str, Any]]:
+    def _build_date_filter_clause(self, filter_startdate: str = None, filter_enddate: str = None) -> str:
         """
-        Fetch Epics from Azure DevOps with filtering done locally
+        Build WIQL date filter clause for date range
+        
+        Args:
+            filter_startdate: Start date string (YYYY-MM-DD)
+            filter_enddate: End date string (YYYY-MM-DD)
+            
+        Returns:
+            WIQL date filter clause
         """
-        # Base WIQL query to fetch only Epic work items
-        wiql = {
-            "query": "SELECT [System.Id] FROM WorkItems WHERE [System.WorkItemType] = 'Epic'"
-        }
+        date_clauses = []
         
-        # Add date filter if provided
-        if filter_date:
-            logger.info(f"Filtering work items created on or after {filter_date}")
-            wiql["query"] += f" AND [System.CreatedDate] >= '{filter_date}'"
+        if filter_startdate:
+            date_clauses.append(f"[System.CreatedDate] >= '{filter_startdate}'")
         
+        if filter_enddate:
+            # Use only the date part without time component
+            date_clauses.append(f"[System.CreatedDate] <= '{filter_enddate}'")
+        
+        return " AND ".join(date_clauses)
+
+    def _should_apply_date_filter(self, work_item_type: str, filter_workitemtype: List[str]) -> bool:
+        """
+        Check if date filter should be applied to a specific work item type
+        
+        Args:
+            work_item_type: The work item type to check
+            filter_workitemtype: List of work item types to apply date filtering to
+            
+        Returns:
+            True if date filter should be applied, False otherwise
+        """
+        # If no specific work item types are specified, apply filter to all types
+        if not filter_workitemtype:
+            return True
+        
+        # Check if the work item type is in the filter list (case-insensitive)
+        return any(work_item_type.lower() == filter_type.lower() for filter_type in filter_workitemtype)
+
+    def fetch_epics(self, custom_field_filters: List[Dict[str, str]] = None, 
+                   filter_date: str = None, filter_startdate: str = None, 
+                   filter_enddate: str = None, filter_workitemtype: List[str] = None) -> List[Dict[str, Any]]:
+        """
+        Fetch Epics from Azure DevOps with enhanced filtering
+        """
         try:
-            # Log the WIQL query for debugging
-            logger.debug(f"WIQL Query: {wiql['query']}")
-            logger.info(f"API Call 1: POST {self.base_url}/wit/wiql?api-version={self.api_version}")
-            logger.info(f"API Call 1 Body: {json.dumps(wiql)}")
+            # Base WIQL query to fetch only Epic work items
+            wiql_query = "SELECT [System.Id] FROM WorkItems WHERE [System.WorkItemType] = 'Epic'"
+            
+            # Handle backward compatibility with filter_date
+            if filter_date and not filter_startdate:
+                filter_startdate = filter_date
+                logger.info(f"Using filter_date as filter_startdate for backward compatibility: {filter_date}")
+            
+            # Add enhanced date filter if applicable for Epic work item type
+            if (filter_startdate or filter_enddate) and self._should_apply_date_filter("Epic", filter_workitemtype):
+                date_clause = self._build_date_filter_clause(filter_startdate, filter_enddate)
+                if date_clause:
+                    wiql_query += f" AND {date_clause}"
+                    logger.info(f"Applied date filter to Epics: {date_clause}")
+            
+            # Log the complete query for debugging
+            logger.debug(f"Complete WIQL query for Epics: {wiql_query}")
+            
+            wiql = {"query": wiql_query}
             
             # Make API call to execute WIQL query
             response = requests.post(
@@ -93,47 +140,62 @@ class AzureDevOpsService:
             raise
 
     def fetch_user_work_items(self, assigned_to: str, custom_field_filters: List[Dict[str, str]] = None, 
-                             filter_date: str = None) -> List[Dict[str, Any]]:
+                        filter_date: str = None, filter_startdate: str = None, 
+                        filter_enddate: str = None, filter_workitemtype: List[str] = None) -> List[Dict[str, Any]]:
         """
-        Fetch all work items assigned to a specific user
+        Fetch all work items assigned to a specific user with enhanced filtering
         """
-        # Build WIQL query to fetch work items assigned to the user
-        wiql = {
-            "query": f"SELECT [System.Id] FROM WorkItems WHERE [System.AssignedTo] = '{assigned_to}'"
-        }
-        
-        # Add date filter if provided
-        if filter_date:
-            logger.info(f"Filtering work items created on or after {filter_date}")
-            wiql["query"] += f" AND [System.CreatedDate] >= '{filter_date}'"
-        
         try:
-            logger.info(f"Fetching work items for user: {assigned_to}")
-            logger.debug(f"WIQL Query: {wiql['query']}")
+            logger.info(f"Fetching work items assigned to {assigned_to} with enhanced filtering...")
             
-            # Make API call to execute WIQL query
-            response = requests.post(
-                f"{self.base_url}/wit/wiql?api-version={self.api_version}",
-                headers=self.headers,
-                json=wiql
-            )
+            # Get all work item types to fetch
+            all_work_item_types = ["Epic", "Feature", "User Story", "Task", "Bug", "QA Validation Task"]
+            work_items = []
             
-            response.raise_for_status()
+            # Fetch work items for each type separately to apply selective date filtering
+            for work_item_type in all_work_item_types:
+                logger.info(f"Fetching {work_item_type} work items for {assigned_to}...")
+                
+                # Build WIQL query for specific work item type
+                wiql_query = f"SELECT [System.Id] FROM WorkItems WHERE [System.AssignedTo] = '{assigned_to}' AND [System.WorkItemType] = '{work_item_type}'"
+                
+                # Add enhanced date filter if applicable for this work item type
+                if (filter_startdate or filter_enddate) and self._should_apply_date_filter(work_item_type, filter_workitemtype):
+                    date_clause = self._build_date_filter_clause(filter_startdate, filter_enddate)
+                    if date_clause:
+                        wiql_query += f" AND {date_clause}"
+                        logger.info(f"Applied date filter to {work_item_type}: {date_clause}")
+                
+                # Log the complete query for debugging
+                logger.debug(f"Complete WIQL query for {work_item_type}: {wiql_query}")
+                
+                wiql = {"query": wiql_query}
+                
+                # Make API call to execute WIQL query
+                response = requests.post(
+                    f"{self.base_url}/wit/wiql?api-version={self.api_version}",
+                    headers=self.headers,
+                    json=wiql
+                )
+                
+                if not response.ok:
+                    logger.error(f"Error response from WIQL API: {response.text}")
+                    response.raise_for_status()
+                
+                # Parse response and extract work item IDs
+                data = response.json()
+                work_item_ids = [item["id"] for item in data.get("workItems", [])]
+                
+                logger.info(f"Found {len(work_item_ids)} {work_item_type} IDs for user {assigned_to}")
+                
+                if work_item_ids:
+                    # Fetch detailed work item data for the IDs with parent information
+                    type_work_items = self._get_work_items_details_with_parents(work_item_ids)
+                    work_items.extend(type_work_items)
+                    logger.info(f"Successfully fetched {len(type_work_items)} {work_item_type} work items for user {assigned_to}")
             
-            # Parse response and extract work item IDs
-            data = response.json()
-            work_item_ids = [item["id"] for item in data.get("workItems", [])]
-            
-            if not work_item_ids:
-                logger.info(f"No work items found assigned to {assigned_to}")
-                return []
-            
-            logger.info(f"Found {len(work_item_ids)} work items assigned to {assigned_to}")
-            
-            # Fetch detailed work item data for the IDs with parent information
-            user_work_items = self._get_work_items_details_with_parents(work_item_ids)
-            
-            return user_work_items
+            logger.info(f"Total work items fetched for {assigned_to}: {len(work_items)}")
+            return work_items
             
         except requests.exceptions.RequestException as e:
             logger.error(f"Error fetching user work items: {str(e)}")
