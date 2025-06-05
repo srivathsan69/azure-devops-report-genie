@@ -145,7 +145,7 @@ def generate_report_api():
         headers:
           file_name:
             type: string
-            description: The filename of the generated report
+            description: The filename of the generated report              
       400:
         description: Bad request - missing required parameters
       500:
@@ -260,7 +260,11 @@ def generate_user_report_api():
         headers:
           file_name:
             type: string
-            description: The filename of the generated report
+            description: The filename of the generated report     
+        headers:
+          file_name:
+            type: string
+            description: The filename of the generated report                     
       400:
         description: Bad request - missing required parameters
       500:
@@ -379,16 +383,17 @@ def generate_report():
         
         if not epics:
             logger.warning("No Epics found matching the criteria")
-            response = jsonify({
+            response_data = {
                 "message": "No Epics found matching the criteria.",
                 "file_url": None
-            })
+            }
+            response = jsonify(response_data)
             response.headers['file_name'] = ""
-            return response, 200
+            return response, 200      
         
-        # Step 2: Process work item hierarchy and roll up data (FOR GENERAL REPORT)
-        logger.info(f"Processing {len(epics)} Epics and their hierarchies with rollup calculation...")
-        processed_data = azure_devops.traverse_hierarchy_enhanced(epics, custom_fields, filter_startdate, filter_enddate, filter_workitemtype)
+        # Step 2: Process work item hierarchy and roll up data
+        logger.info(f"Processing {len(epics)} Epics and their hierarchies...")
+        processed_data = azure_devops.traverse_hierarchy(epics, custom_fields)
         
         # Step 3: Generate Excel report
         logger.info("Generating Excel report...")
@@ -399,8 +404,7 @@ def generate_report():
             processed_data, 
             temp_file_path, 
             sheet_count,
-            custom_fields,
-            is_user_report=False  # This is the general report WITH rollup
+            custom_fields
         )
         
         # Step 4: Upload to Azure Blob Storage
@@ -421,10 +425,13 @@ def generate_report():
         os.unlink(temp_file_path)
         
         logger.info("Report generation completed successfully")
-        response = jsonify({
+        
+        # Create response with headers
+        response_data = {
             "message": "Report generated successfully",
             "file_url": file_url
-        })
+        }
+        response = jsonify(response_data)
         response.headers['file_name'] = blob_name
         return response, 200
         
@@ -493,28 +500,25 @@ def generate_user_report():
             storage_account_sas
         )
         
-        # Step 1: Fetch user's work items WITH parent information using enhanced filtering
+        # Step 1: Fetch user's work items with enhanced filtering
         logger.info(f"Fetching work items assigned to {assigned_to}...")
         user_work_items = azure_devops.fetch_user_work_items_enhanced(assigned_to, custom_fields, filter_startdate, filter_enddate, filter_workitemtype)
         
         if not user_work_items:
             logger.warning(f"No work items found assigned to {assigned_to}")
-            response = jsonify({
+            response_data = {
                 "message": f"No work items found assigned to {assigned_to}.",
                 "file_url": None,
                 "capex_percentage": 0.0
-            })
+            }
+            response = jsonify(response_data)
             response.headers['file_name'] = ""
-            return response, 200
-        
-        # Step 1.5: Fetch parent details for user work items to populate parent fields
-        logger.info("Fetching parent details for user work items...")
-        azure_devops.populate_parent_details(user_work_items)
+            return response, 200     
         
         # Step 2: Calculate CAPEX percentage and add classification if CAPEX fields are provided
         capex_percentage = 0.0
         capex_epic_ids = set()
-        
+
         if capex_fields:
             logger.info("Calculating CAPEX percentage...")
             # Find EPICs that match CAPEX fields using enhanced filtering
@@ -531,7 +535,7 @@ def generate_user_report():
             else:
                 work_item['capex_classification'] = 'non-CAPEX'
         
-        # Step 4: Organize work items by type (WITHOUT rollup calculation for user report)
+        # Step 4: Organize work items by type (without rollup calculation)
         logger.info(f"Organizing {len(user_work_items)} work items by type...")
         organized_data = azure_devops.organize_user_work_items(user_work_items)
         
@@ -546,8 +550,7 @@ def generate_user_report():
             sheet_count,
             custom_fields,
             is_user_report=True,
-            capex_percentage=capex_percentage,
-            user_work_items=user_work_items  # Pass the original work items for CAPEX calculation
+            capex_percentage=capex_percentage
         )
         
         # Step 6: Upload to Azure Blob Storage
@@ -565,14 +568,17 @@ def generate_user_report():
         
         # Clean up temp file
         os.unlink(temp_file_path)
-        
+
         logger.info("User report generation completed successfully")
-        response = jsonify({
+        
+        # Create response with headers
+        response_data = {
             "message": f"User report generated successfully for {assigned_to}",
             "file_url": file_url,
             "capex_percentage": capex_percentage,
             "capex_classification": "Work items are classified as CAPEX or non-CAPEX based on whether they belong to CAPEX epics"
-        })
+        }
+        response = jsonify(response_data)
         response.headers['file_name'] = blob_name
         return response, 200
         
