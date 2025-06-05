@@ -9,20 +9,20 @@ logger = logging.getLogger(__name__)
 # COLUMN CONFIGURATION SECTION
 # ================================================================================
 
-EPIC_COLUMNS = [
+# General report columns (without CAPEX Classification)
+EPIC_COLUMNS_GENERAL = [
     {'field': 'id', 'header': 'ID', 'width': 10},
-    {'field': 'title', 'header': 'Title', 'width': 40},
+    {'field': 'title', 'header': 'Title', 'width': 40},  
     {'field': 'CAPEXJustification', 'header': 'CAPEX Justification', 'width': 40},
     {'field': 'state', 'header': 'State', 'width': 15},
     {'field': 'estimated_hours', 'header': 'Estimated Hours', 'width': 15},
     {'field': 'completed_work', 'header': 'Completed Work', 'width': 15},
     {'field': 'remaining_work', 'header': 'Remaining Work', 'width': 15},
     {'field': 'percent_complete', 'header': '% Complete', 'width': 15},
-    {'field': 'assigned_to', 'header': 'Assigned To', 'width': 20},
-    {'field': 'capex_classification', 'header': 'CAPEX Classification', 'width': 15},    
+    {'field': 'assigned_to', 'header': 'Assigned To', 'width': 20}
 ]
 
-FEATURE_COLUMNS = [
+FEATURE_COLUMNS_GENERAL = [
     {'field': 'id', 'header': 'ID', 'width': 10},
     {'field': 'title', 'header': 'Title', 'width': 40},
     {'field': 'state', 'header': 'State', 'width': 15},
@@ -33,11 +33,10 @@ FEATURE_COLUMNS = [
     {'field': 'completed_work', 'header': 'Completed Work', 'width': 15},
     {'field': 'remaining_work', 'header': 'Remaining Work', 'width': 15},
     {'field': 'percent_complete', 'header': '% Complete', 'width': 15},
-    {'field': 'assigned_to', 'header': 'Assigned To', 'width': 20},
-    {'field': 'capex_classification', 'header': 'CAPEX Classification', 'width': 15},    
+    {'field': 'assigned_to', 'header': 'Assigned To', 'width': 20}
 ]
 
-STORY_COLUMNS = [
+STORY_COLUMNS_GENERAL = [
     {'field': 'id', 'header': 'ID', 'width': 10},
     {'field': 'title', 'header': 'Title', 'width': 40},
     {'field': 'state', 'header': 'State', 'width': 15},
@@ -48,11 +47,10 @@ STORY_COLUMNS = [
     {'field': 'completed_work', 'header': 'Completed Work', 'width': 15},
     {'field': 'remaining_work', 'header': 'Remaining Work', 'width': 15},
     {'field': 'percent_complete', 'header': '% Complete', 'width': 15},
-    {'field': 'assigned_to', 'header': 'Assigned To', 'width': 20},
-    {'field': 'capex_classification', 'header': 'CAPEX Classification', 'width': 15},    
+    {'field': 'assigned_to', 'header': 'Assigned To', 'width': 20}
 ]
 
-TASK_COLUMNS = [
+TASK_COLUMNS_GENERAL = [
     {'field': 'id', 'header': 'ID', 'width': 10},
     {'field': 'title', 'header': 'Title', 'width': 40},
     {'field': 'work_item_type', 'header': 'Type', 'width': 15},
@@ -64,8 +62,65 @@ TASK_COLUMNS = [
     {'field': 'completed_work', 'header': 'Completed Work', 'width': 15},
     {'field': 'remaining_work', 'header': 'Remaining Work', 'width': 15},
     {'field': 'percent_complete', 'header': '% Complete', 'width': 15},
+    {'field': 'assigned_to', 'header': 'Assigned To', 'width': 20}
+]
+
+# User report columns (with CAPEX Classification and any new columns)
+EPIC_COLUMNS_USER = [
+    {'field': 'id', 'header': 'ID', 'width': 10},
+    {'field': 'title', 'header': 'Title', 'width': 40},
+    {'field': 'CAPEXJustification', 'header': 'CAPEX Justification', 'width': 40},
+    {'field': 'state', 'header': 'State', 'width': 15},
+    {'field': 'estimated_hours', 'header': 'Estimated Hours', 'width': 15},
+    {'field': 'completed_work', 'header': 'Completed Work', 'width': 15},
+    {'field': 'remaining_work', 'header': 'Remaining Work', 'width': 15},
+    {'field': 'percent_complete', 'header': '% Complete', 'width': 15},
     {'field': 'assigned_to', 'header': 'Assigned To', 'width': 20},
-    {'field': 'capex_classification', 'header': 'CAPEX Classification', 'width': 15},    
+    {'field': 'capex_classification', 'header': 'CAPEX Classification', 'width': 15},
+    # Add new columns for user report here, example:
+    #{'field': 'created_date', 'header': 'Created Date', 'width': 20}
+]
+
+FEATURE_COLUMNS_USER = [
+    {'field': 'id', 'header': 'ID', 'width': 10},
+    {'field': 'title', 'header': 'Title', 'width': 40},
+    {'field': 'state', 'header': 'State', 'width': 15},
+    {'field': 'estimated_hours', 'header': 'Estimated Hours', 'width': 15},
+    {'field': 'completed_work', 'header': 'Completed Work', 'width': 15},
+    {'field': 'remaining_work', 'header': 'Remaining Work', 'width': 15},
+    {'field': 'percent_complete', 'header': '% Complete', 'width': 15},
+    {'field': 'assigned_to', 'header': 'Assigned To', 'width': 20},
+    {'field': 'capex_classification', 'header': 'CAPEX Classification', 'width': 15},
+    # Add new columns for user report here, example:
+    #{'field': 'created_date', 'header': 'Created Date', 'width': 20}
+]
+
+STORY_COLUMNS_USER = [
+    {'field': 'id', 'header': 'ID', 'width': 10},
+    {'field': 'title', 'header': 'Title', 'width': 40},
+    {'field': 'state', 'header': 'State', 'width': 15},
+    {'field': 'estimated_hours', 'header': 'Estimated Hours', 'width': 15},
+    {'field': 'completed_work', 'header': 'Completed Work', 'width': 15},
+    {'field': 'remaining_work', 'header': 'Remaining Work', 'width': 15},
+    {'field': 'percent_complete', 'header': '% Complete', 'width': 15},
+    {'field': 'assigned_to', 'header': 'Assigned To', 'width': 20},
+    {'field': 'capex_classification', 'header': 'CAPEX Classification', 'width': 15},
+    # Add new columns for user report here, example:
+    #{'field': 'created_date', 'header': 'Created Date', 'width': 20}
+]
+
+TASK_COLUMNS_USER = [
+    {'field': 'id', 'header': 'ID', 'width': 10},
+    {'field': 'title', 'header': 'Title', 'width': 40},
+    {'field': 'state', 'header': 'State', 'width': 15},
+    {'field': 'estimated_hours', 'header': 'Estimated Hours', 'width': 15},
+    {'field': 'completed_work', 'header': 'Completed Work', 'width': 15},
+    {'field': 'remaining_work', 'header': 'Remaining Work', 'width': 15},
+    {'field': 'percent_complete', 'header': '% Complete', 'width': 15},
+    {'field': 'assigned_to', 'header': 'Assigned To', 'width': 20},
+    {'field': 'capex_classification', 'header': 'CAPEX Classification', 'width': 15},
+    # Add new columns for user report here, example:
+    #{'field': 'created_date', 'header': 'Created Date', 'width': 20}
 ]
 
 # ================================================================================
@@ -401,8 +456,12 @@ class ReportService:
         epic_items = self._filter_work_items_by_type(epics, ["Epic"])
         logger.info(f"Epic sheet will contain {len(epic_items)} Epic work items")
         
-        self._build_sheet_with_config(workbook, "Epics", epic_items, EPIC_COLUMNS, 
-                                      header_format, cell_format, percent_format, custom_field_names, is_user_report, capex_percentage)
+        # Use different column configurations based on report type
+        columns = EPIC_COLUMNS_USER if is_user_report else EPIC_COLUMNS_GENERAL
+        
+        self._build_sheet_with_config(workbook, "Epics", epic_items, columns, 
+                                    header_format, cell_format, percent_format, 
+                                    custom_field_names, is_user_report, capex_percentage)
 
     def _build_feature_sheet(self, workbook, features: List[Dict[str, Any]], header_format, cell_format, percent_format,
                             is_user_report: bool = False, capex_percentage: float = 0.0, all_data: Dict[str, Any] = None) -> None:
@@ -418,8 +477,12 @@ class ReportService:
         
         logger.info(f"Feature sheet will contain {len(feature_items)} Feature work items")
         
-        self._build_sheet_with_config(workbook, "Features", feature_items, FEATURE_COLUMNS, 
-                                      header_format, cell_format, percent_format, None, is_user_report, capex_percentage)
+        # Use different column configurations based on report type
+        columns = FEATURE_COLUMNS_USER if is_user_report else FEATURE_COLUMNS_GENERAL
+    
+        self._build_sheet_with_config(workbook, "Features", feature_items, columns, 
+                                    header_format, cell_format, percent_format, None, 
+                                    is_user_report, capex_percentage)
     
     def _build_story_sheet(self, workbook, stories: List[Dict[str, Any]], header_format, cell_format, percent_format,
                           is_user_report: bool = False, capex_percentage: float = 0.0, all_data: Dict[str, Any] = None) -> None:
@@ -434,8 +497,11 @@ class ReportService:
             story_items = self._populate_parent_info(story_items, all_data)
         
         logger.info(f"Story sheet will contain {len(story_items)} User Story work items")
+
+        # Use different column configurations based on report type
+        columns = STORY_COLUMNS_USER if is_user_report else STORY_COLUMNS_GENERAL
         
-        self._build_sheet_with_config(workbook, "User Stories", story_items, STORY_COLUMNS, 
+        self._build_sheet_with_config(workbook, "User Stories", story_items, columns, 
                                       header_format, cell_format, percent_format, None, is_user_report, capex_percentage)
     
     def _build_task_sheet(self, workbook, tasks: List[Dict[str, Any]], header_format, cell_format, percent_format,
@@ -451,6 +517,9 @@ class ReportService:
             task_items = self._populate_parent_info(task_items, all_data)
         
         logger.info(f"Task sheet will contain {len(task_items)} Task/Bug/QA work items")
+
+        # Use different column configurations based on report type
+        columns = TASK_COLUMNS_USER if is_user_report else TASK_COLUMNS_GENERAL
         
-        self._build_sheet_with_config(workbook, "Tasks", task_items, TASK_COLUMNS, 
+        self._build_sheet_with_config(workbook, "Tasks", task_items, columns, 
                                       header_format, cell_format, percent_format, None, is_user_report, capex_percentage)
