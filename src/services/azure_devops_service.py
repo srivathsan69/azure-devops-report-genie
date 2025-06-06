@@ -4,6 +4,7 @@ import json
 import logging
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Set
+import urllib.parse  # Add this import
 
 logger = logging.getLogger(__name__)
 
@@ -11,17 +12,25 @@ class AzureDevOpsService:
     def __init__(self, pat: str, organization: str, project: str):
         self.organization = organization
         self.project = project
-        self.base_url = f"https://dev.azure.com/{organization}/{project}/_apis"
+        # URL-encode project name to handle spaces/special characters
+        encoded_project = urllib.parse.quote(project)
+        self.base_url = f"https://dev.azure.com/{organization}/{encoded_project}/_apis"
+        # Ensure PAT is properly encoded
+        encoded_pat = self._encode_pat(pat)
         self.headers = {
-            "Authorization": f"Basic {self._encode_pat(pat)}",
+            "Authorization": f"Basic {encoded_pat}",
             "Content-Type": "application/json"
         }
-        self.api_version = "7.0"  # Using a recent API version
+        self.api_version = "7.0"
     
     def _encode_pat(self, pat: str) -> str:
         """Encode the Personal Access Token for use in the Authorization header"""
+        # Azure DevOps expects the PAT to be encoded as "username:pat"
+        # where username can be empty
         token = f":{pat}"
-        return base64.b64encode(token.encode()).decode()
+        # Encode to base64 and ensure it's a string
+        encoded = base64.b64encode(token.encode()).decode('utf-8')
+        return encoded
     
     def get_timestamp(self) -> str:
         """Get current timestamp formatted for filenames"""
@@ -67,137 +76,158 @@ class AzureDevOpsService:
         # Check if the work item type is in the filter list (case-insensitive)
         return any(work_item_type.lower() == filter_type.lower() for filter_type in filter_workitemtype)
 
-    def fetch_epics(self, custom_field_filters: List[Dict[str, str]] = None, 
-                   filter_date: str = None, filter_startdate: str = None, 
-                   filter_enddate: str = None, filter_workitemtype: List[str] = None) -> List[Dict[str, Any]]:
+    def _build_wiql_query(self, work_item_type: str, assigned_to: str = None, 
+                         filter_startdate: str = None, filter_enddate: str = None,
+                         filter_workitemtype: List[str] = None) -> str:
         """
-        Fetch Epics from Azure DevOps with enhanced filtering
+        Build a robust WIQL query with proper escaping and encoding
+        """
+        # Escape single quotes by doubling them
+        clean_work_item_type = work_item_type.replace("'", "''")
+        
+        # Create a list to store query parts
+        query_parts = []
+        
+        # Add work item type filter with proper escaping
+        query_parts.append(f"[System.WorkItemType] = '{clean_work_item_type}'")
+        
+        # Add assigned to filter if provided
+        if assigned_to:
+            clean_assigned_to = assigned_to.replace("'", "''")
+            query_parts.append(f"[System.AssignedTo] = '{clean_assigned_to}'")
+        
+        # Add date filters if provided and if this work item type should be filtered
+        should_apply_date_filter = self._should_apply_date_filter(work_item_type, filter_workitemtype)
+        if should_apply_date_filter:
+            if filter_startdate:
+                query_parts.append(f"[System.CreatedDate] >= '{filter_startdate}'")
+            if filter_enddate:
+                query_parts.append(f"[System.CreatedDate] <= '{filter_enddate}'")
+        
+        # Build the final query
+        where_clause = " AND ".join(query_parts)
+        return f"SELECT [System.Id] FROM WorkItems WHERE {where_clause}"
+
+    def fetch_epics(self, custom_field_filters: List[Dict[str, str]] = None, 
+               filter_date: str = None, filter_startdate: str = None, 
+               filter_enddate: str = None, filter_workitemtype: List[str] = None) -> List[Dict[str, Any]]:
+        """
+        Fetch Epic work items with enhanced error handling
         """
         try:
-            # Base WIQL query to fetch only Epic work items
-            wiql_query = "SELECT [System.Id] FROM WorkItems WHERE [System.WorkItemType] = 'Epic'"
+            logger.info("Fetching Epic work items...")
             
-            # Handle backward compatibility with filter_date
-            if filter_date and not filter_startdate:
-                filter_startdate = filter_date
-                logger.info(f"Using filter_date as filter_startdate for backward compatibility: {filter_date}")
+            # Debug the parameters
+            logger.debug(f"Parameters - custom_field_filters: {custom_field_filters}")
+            logger.debug(f"filter_startdate: {filter_startdate}, filter_enddate: {filter_enddate}")
             
-            # Add enhanced date filter if applicable for Epic work item type
-            if (filter_startdate or filter_enddate) and self._should_apply_date_filter("Epic", filter_workitemtype):
-                date_clause = self._build_date_filter_clause(filter_startdate, filter_enddate)
-                if date_clause:
-                    wiql_query += f" AND {date_clause}"
-                    logger.info(f"Applied date filter to Epics: {date_clause}")
+            # Use the generic fetch_work_items method
+            epics = self.fetch_work_items(
+                work_item_type="Epic",  # Hard-coded clean string
+                custom_field_filters=custom_field_filters,
+                filter_startdate=filter_startdate,
+                filter_enddate=filter_enddate,
+                filter_workitemtype=filter_workitemtype
+            )
             
-            # Log the complete query for debugging
-            logger.debug(f"Complete WIQL query for Epics: {wiql_query}")
+            logger.info(f"Found {len(epics)} Epic work items")
+            return epics
             
-            wiql = {"query": wiql_query}
+        except Exception as e:
+            logger.error(f"Error fetching Epics: {str(e)}")
+            raise
+
+    def fetch_work_items(self, work_item_type: str, assigned_to: str = None,
+                        custom_field_filters: List[Dict[str, str]] = None,
+                        filter_startdate: str = None, filter_enddate: str = None,
+                        filter_workitemtype: List[str] = None) -> List[Dict[str, Any]]:
+        """
+        Generic method to fetch work items of any type with filters
+        """
+        try:
+            # Build the WIQL query with proper escaping
+            wiql_query = self._build_wiql_query(
+                work_item_type=work_item_type,
+                assigned_to=assigned_to,
+                filter_startdate=filter_startdate,
+                filter_enddate=filter_enddate,
+                filter_workitemtype=filter_workitemtype
+            )
+
+            # Prepare the request payload
+            payload = {"query": wiql_query}
             
-            # Make API call to execute WIQL query
+            # Log the query for debugging
+            logger.debug(f"Executing WIQL query: {wiql_query}")
+            
+            # Execute the query
             response = requests.post(
                 f"{self.base_url}/wit/wiql?api-version={self.api_version}",
                 headers=self.headers,
-                json=wiql
+                json=payload
             )
             
-            # Check for error in the response
+            # Handle errors with detailed logging
             if not response.ok:
-                try:
-                    error_data = response.json()
-                    logger.error(f"Error response from WIQL API: {json.dumps(error_data)}")
-                except:
-                    logger.error(f"Error response from WIQL API: {response.text}")
-                
-                response.raise_for_status()
+                error_msg = (f"WIQL API Error: {response.status_code} - {response.text}\n"
+                            f"Query: {wiql_query}")
+                logger.error(error_msg)
+                raise requests.exceptions.HTTPError(error_msg)
             
-            # Parse response and extract work item IDs
+            # Parse the response
             data = response.json()
             work_item_ids = [item["id"] for item in data.get("workItems", [])]
             
             if not work_item_ids:
-                logger.info("No Epic work items found matching the date criteria")
+                logger.info(f"No {work_item_type} work items found matching the criteria")
                 return []
             
-            logger.info(f"Found {len(work_item_ids)} Epic work items before custom field filtering")
+            # Get detailed work item data
+            work_items = self._get_work_items_details_with_parents(work_item_ids)
             
-            # Fetch detailed work item data for the IDs
-            all_epics = self._get_work_items_details(work_item_ids)
+            # Apply custom field filters if provided
+            if custom_field_filters:
+                work_items = self._filter_work_items_by_custom_fields(work_items, custom_field_filters)
             
-            # If no custom field filters, return all epics
-            if not custom_field_filters:
-                return all_epics
-            
-            # Apply custom field filters locally
-            logger.info(f"Applying {len(custom_field_filters)} custom field filters locally")
-            filtered_epics = self._filter_work_items_by_custom_fields(all_epics, custom_field_filters)
-            
-            logger.info(f"{len(filtered_epics)} epics remain after applying custom field filters")
-            return filtered_epics
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error fetching Epics: {str(e)}")
-            raise
-
-    def fetch_user_work_items(self, assigned_to: str, custom_field_filters: List[Dict[str, str]] = None, 
-                        filter_date: str = None, filter_startdate: str = None, 
-                        filter_enddate: str = None, filter_workitemtype: List[str] = None) -> List[Dict[str, Any]]:
-        """
-        Fetch all work items assigned to a specific user with enhanced filtering
-        """
-        try:
-            logger.info(f"Fetching work items assigned to {assigned_to} with enhanced filtering...")
-            
-            # Get all work item types to fetch
-            all_work_item_types = ["Epic", "Feature", "User Story", "Task", "Bug", "QA Validation Task"]
-            work_items = []
-            
-            # Fetch work items for each type separately to apply selective date filtering
-            for work_item_type in all_work_item_types:
-                logger.info(f"Fetching {work_item_type} work items for {assigned_to}...")
-                
-                # Build WIQL query for specific work item type
-                wiql_query = f"SELECT [System.Id] FROM WorkItems WHERE [System.AssignedTo] = '{assigned_to}' AND [System.WorkItemType] = '{work_item_type}'"
-                
-                # Add enhanced date filter if applicable for this work item type
-                if (filter_startdate or filter_enddate) and self._should_apply_date_filter(work_item_type, filter_workitemtype):
-                    date_clause = self._build_date_filter_clause(filter_startdate, filter_enddate)
-                    if date_clause:
-                        wiql_query += f" AND {date_clause}"
-                        logger.info(f"Applied date filter to {work_item_type}: {date_clause}")
-                
-                # Log the complete query for debugging
-                logger.debug(f"Complete WIQL query for {work_item_type}: {wiql_query}")
-                
-                wiql = {"query": wiql_query}
-                
-                # Make API call to execute WIQL query
-                response = requests.post(
-                    f"{self.base_url}/wit/wiql?api-version={self.api_version}",
-                    headers=self.headers,
-                    json=wiql
-                )
-                
-                if not response.ok:
-                    logger.error(f"Error response from WIQL API: {response.text}")
-                    response.raise_for_status()
-                
-                # Parse response and extract work item IDs
-                data = response.json()
-                work_item_ids = [item["id"] for item in data.get("workItems", [])]
-                
-                logger.info(f"Found {len(work_item_ids)} {work_item_type} IDs for user {assigned_to}")
-                
-                if work_item_ids:
-                    # Fetch detailed work item data for the IDs with parent information
-                    type_work_items = self._get_work_items_details_with_parents(work_item_ids)
-                    work_items.extend(type_work_items)
-                    logger.info(f"Successfully fetched {len(type_work_items)} {work_item_type} work items for user {assigned_to}")
-            
-            logger.info(f"Total work items fetched for {assigned_to}: {len(work_items)}")
             return work_items
             
         except requests.exceptions.RequestException as e:
+            logger.error(f"Error fetching {work_item_type} work items: {str(e)}")
+            raise
+
+    def fetch_user_work_items(self, assigned_to: str, custom_field_filters: List[Dict[str, str]] = None, 
+                             filter_date: str = None, filter_startdate: str = None, 
+                             filter_enddate: str = None, filter_workitemtype: List[str] = None) -> List[Dict[str, Any]]:
+        """
+        Fetch all work items assigned to a specific user with enhanced error handling
+        """
+        try:
+            logger.info(f"Fetching work items assigned to {assigned_to}...")
+            
+            # Define work item types to fetch
+            work_item_types = ["Epic", "Feature", "User Story", "Task", "Bug", "QA Validation Task"]
+            all_work_items = []
+            
+            # Fetch each work item type
+            for work_item_type in work_item_types:
+                try:
+                    items = self.fetch_work_items(
+                        work_item_type=work_item_type,
+                        assigned_to=assigned_to,
+                        filter_startdate=filter_startdate,
+                        filter_enddate=filter_enddate,
+                        filter_workitemtype=filter_workitemtype
+                    )
+                    all_work_items.extend(items)
+                    logger.info(f"Found {len(items)} {work_item_type} items for {assigned_to}")
+                except Exception as e:
+                    logger.error(f"Error fetching {work_item_type} items: {str(e)}")
+                    # Continue with other work item types even if one fails
+                    continue
+            
+            return all_work_items
+            
+        except Exception as e:
             logger.error(f"Error fetching user work items: {str(e)}")
             raise
 
@@ -422,7 +452,7 @@ class AzureDevOpsService:
         
         return result
     
-    def _get_all_descendant_work_items(self, epic_ids: List[int]) -> Dict[str, List[Dict[str, Any]]]:
+    def _get_all_descendant_work_items(self, epic_ids: List[int], filter_workitemtype: List[str] = None) -> Dict[str, List[Dict[str, Any]]]:
         """
         Get all work items that are descendants of the given epic IDs, regardless of hierarchy violations
         """
@@ -637,7 +667,8 @@ class AzureDevOpsService:
         
         return capex_estimated / total_estimated
 
-    def traverse_hierarchy(self, epics: List[Dict[str, Any]], custom_field_filters: List[Dict[str, str]] = None) -> Dict[str, Any]:
+    def traverse_hierarchy(self, epics: List[Dict[str, Any]], custom_field_filters: List[Dict[str, str]] = None,
+                          filter_workitemtype: List[str] = None) -> Dict[str, Any]:
         """
         Traverse the work item hierarchy starting from epics, including items that don't follow strict hierarchy
         """
@@ -646,7 +677,7 @@ class AzureDevOpsService:
         epic_ids = [epic["id"] for epic in epics]
         
         # Get all descendants of these epics
-        descendants = self._get_all_descendant_work_items(epic_ids)
+        descendants = self._get_all_descendant_work_items(epic_ids, filter_workitemtype)
         
         # Add the original epics to the results
         all_epics = epics + descendants["epics"]

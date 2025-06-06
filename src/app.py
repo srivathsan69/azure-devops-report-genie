@@ -1,4 +1,3 @@
-
 from flask import Flask, request, jsonify
 import logging
 import os
@@ -379,7 +378,12 @@ def generate_report():
         
         # Step 1: Fetch Epics from Azure DevOps using the enhanced filtering
         logger.info("Fetching Epics from Azure DevOps...")
-        epics = azure_devops.fetch_epics(custom_fields, filter_startdate, filter_enddate, filter_workitemtype)
+        epics = azure_devops.fetch_epics(
+            custom_field_filters=custom_fields,
+            filter_startdate=filter_startdate,
+            filter_enddate=filter_enddate,
+            filter_workitemtype=filter_workitemtype
+        )
         
         if not epics:
             logger.warning("No Epics found matching the criteria")
@@ -393,7 +397,11 @@ def generate_report():
         
         # Step 2: Process work item hierarchy and roll up data
         logger.info(f"Processing {len(epics)} Epics and their hierarchies...")
-        processed_data = azure_devops.traverse_hierarchy(epics, custom_fields)
+        processed_data = azure_devops.traverse_hierarchy(
+            epics, 
+            custom_fields,
+            filter_workitemtype=filter_workitemtype
+        )
         
         # Step 3: Generate Excel report
         logger.info("Generating Excel report...")
@@ -502,7 +510,14 @@ def generate_user_report():
         
         # Step 1: Fetch user's work items with enhanced filtering
         logger.info(f"Fetching work items assigned to {assigned_to}...")
-        user_work_items = azure_devops.fetch_user_work_items(assigned_to, custom_fields, None, filter_startdate, filter_enddate, filter_workitemtype)
+        # For user work items
+        user_work_items = azure_devops.fetch_user_work_items(
+            assigned_to=assigned_to,
+            custom_field_filters=custom_fields,
+            filter_startdate=filter_startdate,
+            filter_enddate=filter_enddate,
+            filter_workitemtype=filter_workitemtype
+        )
         
         if not user_work_items:
             logger.warning(f"No work items found assigned to {assigned_to}")
@@ -522,7 +537,14 @@ def generate_user_report():
         if capex_fields:
             logger.info("Calculating CAPEX percentage...")
             # Find EPICs that match CAPEX fields using enhanced filtering
-            capex_epics = azure_devops.fetch_epics(capex_fields, filter_startdate, filter_enddate, filter_workitemtype)
+            # For CAPEX epics
+            capex_epics = azure_devops.fetch_epics(
+                custom_field_filters=capex_fields,
+                filter_startdate=filter_startdate,
+                filter_enddate=filter_enddate,
+                filter_workitemtype=filter_workitemtype
+            )
+
             capex_epic_ids = {epic['id'] for epic in capex_epics}
             capex_percentage = azure_devops.calculate_capex_percentage(user_work_items, capex_epics)
             logger.info(f"CAPEX percentage calculated: {capex_percentage:.2%}")

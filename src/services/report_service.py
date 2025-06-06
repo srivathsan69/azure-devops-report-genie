@@ -19,7 +19,8 @@ EPIC_COLUMNS_GENERAL = [
     {'field': 'completed_work', 'header': 'Completed Work', 'width': 15},
     {'field': 'remaining_work', 'header': 'Remaining Work', 'width': 15},
     {'field': 'percent_complete', 'header': '% Complete', 'width': 15},
-    {'field': 'assigned_to', 'header': 'Assigned To', 'width': 20}
+    {'field': 'assigned_to', 'header': 'Assigned To', 'width': 20},
+    {'field': 'created_date', 'header': 'Created Date', 'width': 20}   
 ]
 
 FEATURE_COLUMNS_GENERAL = [
@@ -33,7 +34,8 @@ FEATURE_COLUMNS_GENERAL = [
     {'field': 'completed_work', 'header': 'Completed Work', 'width': 15},
     {'field': 'remaining_work', 'header': 'Remaining Work', 'width': 15},
     {'field': 'percent_complete', 'header': '% Complete', 'width': 15},
-    {'field': 'assigned_to', 'header': 'Assigned To', 'width': 20}
+    {'field': 'assigned_to', 'header': 'Assigned To', 'width': 20},
+    {'field': 'created_date', 'header': 'Created Date', 'width': 20}  
 ]
 
 STORY_COLUMNS_GENERAL = [
@@ -47,7 +49,8 @@ STORY_COLUMNS_GENERAL = [
     {'field': 'completed_work', 'header': 'Completed Work', 'width': 15},
     {'field': 'remaining_work', 'header': 'Remaining Work', 'width': 15},
     {'field': 'percent_complete', 'header': '% Complete', 'width': 15},
-    {'field': 'assigned_to', 'header': 'Assigned To', 'width': 20}
+    {'field': 'assigned_to', 'header': 'Assigned To', 'width': 20},
+    {'field': 'created_date', 'header': 'Created Date', 'width': 20}   
 ]
 
 TASK_COLUMNS_GENERAL = [
@@ -62,7 +65,8 @@ TASK_COLUMNS_GENERAL = [
     {'field': 'completed_work', 'header': 'Completed Work', 'width': 15},
     {'field': 'remaining_work', 'header': 'Remaining Work', 'width': 15},
     {'field': 'percent_complete', 'header': '% Complete', 'width': 15},
-    {'field': 'assigned_to', 'header': 'Assigned To', 'width': 20}
+    {'field': 'assigned_to', 'header': 'Assigned To', 'width': 20},
+    {'field': 'created_date', 'header': 'Created Date', 'width': 20}   
 ]
 
 # User report columns (with CAPEX Classification and any new columns)
@@ -77,6 +81,7 @@ EPIC_COLUMNS_USER = [
     {'field': 'percent_complete', 'header': '% Complete', 'width': 15},
     {'field': 'assigned_to', 'header': 'Assigned To', 'width': 20},
     {'field': 'capex_classification', 'header': 'CAPEX Classification', 'width': 15},
+    {'field': 'created_date', 'header': 'Created Date', 'width': 20}
     # Add new columns for user report here, example:
     #{'field': 'created_date', 'header': 'Created Date', 'width': 20}
 ]
@@ -91,6 +96,7 @@ FEATURE_COLUMNS_USER = [
     {'field': 'percent_complete', 'header': '% Complete', 'width': 15},
     {'field': 'assigned_to', 'header': 'Assigned To', 'width': 20},
     {'field': 'capex_classification', 'header': 'CAPEX Classification', 'width': 15},
+    {'field': 'created_date', 'header': 'Created Date', 'width': 20} 
     # Add new columns for user report here, example:
     #{'field': 'created_date', 'header': 'Created Date', 'width': 20}
 ]
@@ -105,6 +111,7 @@ STORY_COLUMNS_USER = [
     {'field': 'percent_complete', 'header': '% Complete', 'width': 15},
     {'field': 'assigned_to', 'header': 'Assigned To', 'width': 20},
     {'field': 'capex_classification', 'header': 'CAPEX Classification', 'width': 15},
+    {'field': 'created_date', 'header': 'Created Date', 'width': 20}
     # Add new columns for user report here, example:
     #{'field': 'created_date', 'header': 'Created Date', 'width': 20}
 ]
@@ -119,6 +126,7 @@ TASK_COLUMNS_USER = [
     {'field': 'percent_complete', 'header': '% Complete', 'width': 15},
     {'field': 'assigned_to', 'header': 'Assigned To', 'width': 20},
     {'field': 'capex_classification', 'header': 'CAPEX Classification', 'width': 15},
+    {'field': 'created_date', 'header': 'Created Date', 'width': 20}  
     # Add new columns for user report here, example:
     #{'field': 'created_date', 'header': 'Created Date', 'width': 20}
 ]
