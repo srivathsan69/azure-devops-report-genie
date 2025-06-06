@@ -8,6 +8,10 @@ import urllib.parse  # Add this import
 
 logger = logging.getLogger(__name__)
 
+class AzureDevOpsAuthenticationError(Exception):
+    """Custom exception for Azure DevOps authentication errors"""
+    pass
+
 class AzureDevOpsService:
     def __init__(self, pat: str, organization: str, project: str):
         self.organization = organization
@@ -167,15 +171,27 @@ class AzureDevOpsService:
                 json=payload
             )
             
-            # Handle errors with detailed logging
+            # Handle authentication errors specifically
+            if response.status_code == 401:
+                logger.error("Azure DevOps authentication failed - Invalid PAT token")
+                raise Exception("Invalid Azure DevOps PAT token. Please check your credentials.")
+            
+            # Handle other errors with detailed logging
             if not response.ok:
                 error_msg = (f"WIQL API Error: {response.status_code} - {response.text}\n"
                             f"Query: {wiql_query}")
                 logger.error(error_msg)
                 raise requests.exceptions.HTTPError(error_msg)
             
-            # Parse the response
-            data = response.json()
+            try:
+                # Parse the response
+                data = response.json()
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse Azure DevOps response: {response.text}")
+                if response.status_code == 401:
+                    raise Exception("Invalid Azure DevOps PAT token. Please check your credentials.")
+                raise Exception("Failed to parse Azure DevOps response. Please check your credentials and try again.")
+            
             work_item_ids = [item["id"] for item in data.get("workItems", [])]
             
             if not work_item_ids:
@@ -191,7 +207,9 @@ class AzureDevOpsService:
             
             return work_items
             
-        except requests.exceptions.RequestException as e:
+        except Exception as e:
+            if "Invalid Azure DevOps PAT token" in str(e):
+                raise
             logger.error(f"Error fetching {work_item_type} work items: {str(e)}")
             raise
 

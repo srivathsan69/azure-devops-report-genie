@@ -378,12 +378,28 @@ def generate_report():
         
         # Step 1: Fetch Epics from Azure DevOps using the enhanced filtering
         logger.info("Fetching Epics from Azure DevOps...")
-        epics = azure_devops.fetch_epics(
-            custom_field_filters=custom_fields,
-            filter_startdate=filter_startdate,
-            filter_enddate=filter_enddate,
-            filter_workitemtype=filter_workitemtype
-        )
+        try:
+            epics = azure_devops.fetch_epics(
+                custom_field_filters=custom_fields,
+                filter_startdate=filter_startdate,
+                filter_enddate=filter_enddate,
+                filter_workitemtype=filter_workitemtype
+            )
+        except Exception as e:
+            error_message = str(e)
+            if "Invalid Azure DevOps PAT token" in error_message:
+                logger.error("Authentication failed with Azure DevOps")
+                return jsonify({
+                    "error": "Invalid Azure DevOps PAT token. Please check your credentials.",
+                    "status": "unauthorized"
+                }), 401
+            elif "Failed to parse Azure DevOps response" in error_message:
+                logger.error("Failed to parse Azure DevOps response")
+                return jsonify({
+                    "error": "Failed to connect to Azure DevOps. Please check your credentials and try again.",
+                    "status": "error"
+                }), 500
+            raise
         
         if not epics:
             logger.warning("No Epics found matching the criteria")
@@ -445,15 +461,25 @@ def generate_report():
         
     except Exception as e:
         logger.exception("Error generating report")
-        # Provide more detailed error information in the response
-        error_details = {
-            "error": f"Failed to generate report: {str(e)}",
-            "type": type(e).__name__,
-            "traceback": traceback.format_exc()
-        }
-        response = jsonify(error_details)
-        response.headers['file_name'] = ""
-        return response, 500
+        error_message = str(e)
+        
+        # Handle specific error cases
+        if "Invalid Azure DevOps PAT token" in error_message:
+            return jsonify({
+                "error": "Invalid Azure DevOps PAT token. Please check your credentials.",
+                "status": "unauthorized"
+            }), 401
+        elif "Failed to parse Azure DevOps response" in error_message:
+            return jsonify({
+                "error": "Failed to connect to Azure DevOps. Please check your credentials and try again.",
+                "status": "error"
+            }), 500
+        
+        # For other errors, provide a generic error message
+        return jsonify({
+            "error": "An error occurred while generating the report. Please try again.",
+            "status": "error"
+        }), 500
 
 def generate_user_report():
     """Implementation of the user-specific report generation endpoint"""
